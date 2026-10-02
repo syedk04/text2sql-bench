@@ -49,7 +49,7 @@ _FORBIDDEN = _node_types(
 )
 
 
-def check_select_only(sql: str) -> exp.Expression:
+def check_select_only(sql: str) -> exp.Query:
     """Return the parsed query, or raise :class:`UnsafeSQL` explaining why not."""
     if not isinstance(sql, str) or not sql.strip():
         raise UnsafeSQL("empty SQL")

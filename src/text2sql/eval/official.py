@@ -205,7 +205,7 @@ def run_official(
     pred_queries, _ = utils.package_sqls(str(pred_path), db_root_str, mode="pred")
     gt_queries, db_paths = utils.package_sqls(str(gold_path), db_root_str, mode="gt")
     pairs = list(zip(pred_queries, gt_queries))  # noqa: B905 - official truncation semantics
-    ex.exec_result = []
+    ex.exec_result = []  # type: ignore[attr-defined]  # set by the script's __main__
     ex.run_sqls_parallel(
         pairs, db_places=db_paths, num_cpus=1, meta_time_out=timeout_s, sql_dialect="SQLite"
     )
