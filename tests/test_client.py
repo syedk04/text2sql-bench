@@ -164,3 +164,17 @@ def test_works_without_optional_parts():
     assert client.complete(_req()).text == "SELECT 1"
     with pytest.raises(ValueError):
         LLMClient(FakeProvider(["x"]), max_attempts=0)
+
+
+@pytest.mark.parametrize("content", [b"[]", b"\xff\xfe", b'{"key": 1}', b"null"])
+def test_corrupt_cache_entry_falls_back_to_provider(tmp_path, content):
+    cache = DiskCache(tmp_path)
+    req = _req()
+    path = cache.path_for(cache_key(req))
+    path.parent.mkdir(parents=True)
+    path.write_bytes(content)
+    provider = FakeProvider(["SELECT 9"])
+    client = LLMClient(provider, cache=cache)
+    assert client.complete(req).text == "SELECT 9"
+    assert provider.calls == 1
+    assert cache.get(cache_key(req)).text == "SELECT 9"  # repaired

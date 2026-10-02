@@ -130,3 +130,55 @@ def test_temp_file_name_is_short(tmp_path, monkeypatch):
     src, dst = seen[0]
     assert len(src) <= len(dst)
     assert os.path.dirname(src) == os.path.dirname(dst)
+
+
+def _entry(key, **response):
+    return json.dumps({"key": key, "response": response}).encode("utf-8")
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"",
+        b"[]",
+        b'"x"',
+        b"null",
+        b"42",
+        b"\xff\xfe{}",
+        "DEEP",
+        "KEY_RESP_LIST",
+        "KEY_TEXT_INT",
+        "KEY_TEXT_NULL",
+        "KEY_TEXT_EMPTY",
+        "KEY_TOKENS_STR",
+        "KEY_TOKENS_NEG",
+        "KEY_TOKENS_BOOL",
+        "KEY_RAW_LIST",
+    ],
+)
+def test_any_malformed_entry_is_a_miss(tmp_path, content):
+    cache = DiskCache(tmp_path)
+    req = _req()
+    key = cache_key(req)
+    variants = {
+        "KEY_RESP_LIST": json.dumps({"key": key, "response": [1]}).encode(),
+        "KEY_TEXT_INT": _entry(key, text=123),
+        "KEY_TEXT_NULL": _entry(key, text=None),
+        "KEY_TEXT_EMPTY": _entry(key, text="  "),
+        "KEY_TOKENS_STR": _entry(key, text="x", prompt_tokens="5"),
+        "KEY_TOKENS_NEG": _entry(key, text="x", completion_tokens=-1),
+        "KEY_TOKENS_BOOL": _entry(key, text="x", prompt_tokens=True),
+        "KEY_RAW_LIST": _entry(key, text="x", raw=[1]),
+        "DEEP": b"[" * 100000,
+    }
+    path = cache.path_for(key)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(variants.get(content, content) if isinstance(content, str) else content)
+    assert cache.get(key) is None
+
+
+def test_directory_in_place_of_entry_is_a_miss(tmp_path):
+    cache = DiskCache(tmp_path)
+    key = cache_key(_req())
+    cache.path_for(key).mkdir(parents=True)
+    assert cache.get(key) is None

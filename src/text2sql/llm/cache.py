@@ -48,26 +48,31 @@ class DiskCache:
         return self.root / key[:2] / f"{key}.json"
 
     def get(self, key: str) -> CompletionResponse | None:
+        """Return the cached response, or None. Anything unreadable or not in the
+        expected shape is a miss (the next successful call rewrites it); this
+        method never raises for a bad entry."""
         path = self.path_for(key)
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
+            data = json.loads(path.read_bytes().decode("utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError, RecursionError):
             return None
-        except (OSError, json.JSONDecodeError):
-            # Unreadable entry: treat as a miss; the next successful call rewrites it.
+        if not isinstance(data, dict) or data.get("key") != key:
             return None
-        if data.get("key") != key:
+        resp = data.get("response")
+        if not isinstance(resp, dict):
             return None
-        resp = data.get("response") or {}
-        try:
-            return CompletionResponse(
-                text=resp["text"],
-                prompt_tokens=int(resp.get("prompt_tokens", 0)),
-                completion_tokens=int(resp.get("completion_tokens", 0)),
-                raw=resp.get("raw"),
-            )
-        except (KeyError, TypeError, ValueError):
+        text = resp.get("text")
+        prompt_tokens = resp.get("prompt_tokens", 0)
+        completion_tokens = resp.get("completion_tokens", 0)
+        raw = resp.get("raw")
+        if not isinstance(text, str) or not text.strip():
             return None
+        for n in (prompt_tokens, completion_tokens):
+            if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+                return None
+        if raw is not None and not isinstance(raw, dict):
+            return None
+        return CompletionResponse(text, prompt_tokens, completion_tokens, raw)
 
     def put(self, key: str, request: CompletionRequest, response: CompletionResponse) -> Path:
         path = self.path_for(key)
