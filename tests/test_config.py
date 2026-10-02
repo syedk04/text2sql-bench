@@ -21,7 +21,7 @@ def test_env_override_moves_everything(monkeypatch, tmp_path):
     assert config.db_path("financial") == expected
 
 
-@pytest.mark.parametrize("bad", ["", "../etc", "a/b", "a\b"])
+@pytest.mark.parametrize("bad", ["", "../etc", "a/b", r"a\b"])
 def test_db_path_rejects_path_tricks(bad):
     with pytest.raises(ValueError):
         config.db_path(bad)
