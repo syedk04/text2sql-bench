@@ -105,3 +105,100 @@ def score_one(
         error=error,
         elapsed_s=time.monotonic() - start,
     )
+
+
+# --- batches ---------------------------------------------------------------------
+
+OFFICIAL_SEPARATOR = "\t----- bird -----\t"
+OFFICIAL_FALLBACK_DB = "financial"
+
+
+@dataclass(frozen=True)
+class OfficialPrediction:
+    sql: str
+    db_id: str
+    well_formed: bool  # False when the official parser had to fall back
+
+
+def parse_official_predictions(raw: dict[str, Any]) -> list[OfficialPrediction]:
+    """Parse a BIRD prediction file the way the official ``package_sqls`` does.
+
+    Values look like ``<sql> TAB ----- bird ----- TAB <db_id>``. Order is the file's
+    key order (position, not key value, is what matches a gold line). A non-string
+    value becomes ``" "``; a string without exactly one separator is used whole
+    (stripped). Both fall back to db ``financial``, which the scorer ignores anyway
+    because the gold side decides the database.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"prediction file must be a JSON object, got {type(raw).__name__}")
+    out: list[OfficialPrediction] = []
+    for value in raw.values():
+        if isinstance(value, str):
+            parts = value.split(OFFICIAL_SEPARATOR)
+            if len(parts) == 2:
+                out.append(OfficialPrediction(parts[0], parts[1], True))
+            else:
+                out.append(OfficialPrediction(value.strip(), OFFICIAL_FALLBACK_DB, False))
+        else:
+            out.append(OfficialPrediction(" ", OFFICIAL_FALLBACK_DB, False))
+    return out
+
+
+def load_official_predictions(path: str | Path) -> list[OfficialPrediction]:
+    import json
+
+    with open(path, encoding="utf-8") as fh:
+        return parse_official_predictions(json.load(fh))
+
+
+def score_many(
+    questions: Sequence[Question],
+    predictions: Sequence[str | None],
+    *,
+    timeout_s: float = OFFICIAL_TIMEOUT_S,
+    progress: Any = None,
+) -> list[ScoreResult]:
+    """Score predictions against questions by position."""
+    if len(predictions) != len(questions):
+        raise ValueError(
+            f"{len(predictions)} predictions for {len(questions)} questions; "
+            "the official script pairs them by position, so the counts must match"
+        )
+    results = []
+    for i, (q, sql) in enumerate(zip(questions, predictions, strict=True)):
+        results.append(score_one(q, sql, timeout_s=timeout_s))
+        if progress is not None:
+            progress(i + 1, len(questions), results[-1])
+    return results
+
+
+@dataclass(frozen=True)
+class Breakdown:
+    n: int
+    correct: int
+
+    @property
+    def ex(self) -> float:
+        return 100.0 * self.correct / self.n if self.n else 0.0
+
+
+def breakdown(results: Sequence[ScoreResult]) -> dict[str, Breakdown]:
+    """EX per difficulty plus ``total``, in the official column order."""
+    from text2sql.data.bird import DIFFICULTIES
+
+    table: dict[str, Breakdown] = {}
+    for difficulty in DIFFICULTIES:
+        sub = [r for r in results if r.difficulty == difficulty]
+        table[difficulty] = Breakdown(len(sub), sum(r.correct for r in sub))
+    table["total"] = Breakdown(len(results), sum(r.correct for r in results))
+    return table
+
+
+def format_breakdown(table: dict[str, Breakdown]) -> str:
+    cols = list(table)
+    lines = [
+        f"{'':12}" + "".join(f"{c:>14}" for c in cols),
+        f"{'count':12}" + "".join(f"{table[c].n:>14}" for c in cols),
+        f"{'EX':12}" + "".join(f"{table[c].ex:>14.2f}" for c in cols),
+    ]
+    return "\n".join(lines)

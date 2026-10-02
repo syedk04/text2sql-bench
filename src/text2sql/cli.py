@@ -66,6 +66,56 @@ def _cmd_build_manifest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_eval_preds(args: argparse.Namespace) -> int:
+    import json
+
+    from text2sql.data.bird import load_questions
+    from text2sql.eval.ex import (
+        breakdown,
+        format_breakdown,
+        load_official_predictions,
+        score_many,
+    )
+
+    qpath = Path(args.questions) if args.questions else config.questions_path()
+    questions = load_questions(qpath)
+    preds = load_official_predictions(args.preds)
+    if len(preds) != len(questions):
+        print(f"error: {len(preds)} predictions but {len(questions)} questions")
+        return 1
+    malformed = [i for i, p in enumerate(preds) if not p.well_formed]
+    db_mismatch = [
+        i for i, (p, q) in enumerate(zip(preds, questions, strict=True))
+        if p.well_formed and p.db_id != q.db_id
+    ]
+
+    def progress(done: int, total: int, _r: object) -> None:
+        if done % 50 == 0 or done == total:
+            print(f"  scored {done}/{total}", flush=True)
+
+    results = score_many(
+        questions, [p.sql for p in preds], timeout_s=args.timeout, progress=progress
+    )
+    print(format_breakdown(breakdown(results)))
+    statuses: dict[str, int] = {}
+    for r in results:
+        key = f"pred:{r.pred_status}/gold:{r.gold_status}"
+        statuses[key] = statuses.get(key, 0) + 1
+    print("outcomes: " + ", ".join(f"{k}={v}" for k, v in sorted(statuses.items())))
+    if malformed:
+        print(f"warning: {len(malformed)} malformed prediction entries at positions {malformed}")
+    if db_mismatch:
+        print(f"warning: prediction db_id differs from gold at positions {db_mismatch}")
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8", newline="\n") as fh:
+            for r in results:
+                fh.write(json.dumps(r.__dict__, ensure_ascii=False) + "\n")
+        print(f"per-question results written to {out}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="text2sql", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -96,6 +146,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=str(DEFAULT_MANIFEST), help="output manifest path")
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p.set_defaults(handler=_cmd_build_manifest)
+
+    p = sub.add_parser(
+        "eval-preds",
+        help="score a prediction file in the official BIRD format (JSON object of SQL strings)",
+    )
+    p.add_argument("--preds", required=True, help="prediction JSON")
+    p.add_argument("--questions", help="question file (default: data/bird/mini_dev_sqlite.json)")
+    p.add_argument("--timeout", type=float, default=30.0, help="seconds per question")
+    p.add_argument("--out", help="optional JSONL file for per-question results")
+    p.set_defaults(handler=_cmd_eval_preds)
 
     return parser
 
