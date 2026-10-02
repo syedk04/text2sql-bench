@@ -7,6 +7,7 @@ can drive time by hand instead of waiting.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -21,6 +22,14 @@ from pathlib import Path
 from text2sql.llm.types import BudgetExceeded
 
 
+def _finite_number(value: object) -> bool:
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
 class TokenBucket:
     """Classic token bucket: ``rate_per_minute`` requests on average, bursts up
     to ``capacity``. ``acquire`` blocks (via ``sleep``) until a token is free."""
@@ -33,14 +42,15 @@ class TokenBucket:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        if rate_per_minute <= 0:
-            raise ValueError("rate_per_minute must be positive")
+        if not _finite_number(rate_per_minute) or rate_per_minute <= 0:
+            raise ValueError("rate_per_minute must be a finite positive number")
+        if capacity is not None and (not _finite_number(capacity) or capacity < 1):
+            raise ValueError("capacity must be a finite number >= 1")
         self.rate_per_s = rate_per_minute / 60.0
         self.capacity = float(capacity if capacity is not None else max(1.0, rate_per_minute))
-        if self.capacity < 1:
-            raise ValueError("capacity must be at least 1")
         self._clock = clock
         self._sleep = sleep
+        self._lock = threading.Lock()
         self._tokens = self.capacity
         self._last = clock()
 
@@ -52,18 +62,24 @@ class TokenBucket:
 
     @property
     def available(self) -> float:
-        self._refill()
-        return self._tokens
+        with self._lock:
+            self._refill()
+            return self._tokens
 
     def acquire(self) -> float:
-        """Take one token; returns how long we waited (seconds)."""
+        """Take one token; returns how long we waited (seconds).
+
+        Thread-safe: the refill-check-take step happens under a lock, and the
+        sleep happens outside it so other threads are not blocked meanwhile.
+        """
         waited = 0.0
         while True:
-            self._refill()
-            if self._tokens >= 1.0:
-                self._tokens -= 1.0
-                return waited
-            delay = (1.0 - self._tokens) / self.rate_per_s
+            with self._lock:
+                self._refill()
+                if self._tokens >= 1.0:
+                    self._tokens -= 1.0
+                    return waited
+                delay = (1.0 - self._tokens) / self.rate_per_s
             self._sleep(delay)
             waited += delay
 

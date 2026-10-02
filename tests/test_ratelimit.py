@@ -60,7 +60,21 @@ def test_bucket_survives_clock_going_backwards():
     assert bucket.acquire() == pytest.approx(1.0)
 
 
-@pytest.mark.parametrize("rate, cap", [(0, None), (-1, None), (10, 0.5)])
+@pytest.mark.parametrize(
+    "rate, cap",
+    [
+        (0, None),
+        (-1, None),
+        (10, 0.5),
+        (float("nan"), None),
+        (float("inf"), None),
+        (10, float("nan")),
+        (10, float("inf")),
+        (10, 0),
+        (True, None),
+        ("60", None),
+    ],
+)
 def test_bucket_bad_config(rate, cap):
     with pytest.raises(ValueError):
         TokenBucket(rate, cap)
@@ -236,3 +250,42 @@ def test_stale_lock_file_is_cleared(tmp_path):
     os.utime(lock, (old, old))
     DailyTokenBudget(100, path, today=lambda: "2026-10-02").record(5)
     assert not lock.exists()
+
+
+def test_bucket_never_over_grants_across_threads():
+    import sys
+    import threading
+
+    class Stop(Exception):
+        pass
+
+    def no_sleep(_d):
+        raise Stop
+
+    bucket = TokenBucket(60, capacity=1000, clock=lambda: 0.0, sleep=no_sleep)
+    granted = []
+    lock = threading.Lock()
+
+    def worker():
+        n = 0
+        while True:
+            try:
+                bucket.acquire()
+            except Stop:
+                break
+            n += 1
+        with lock:
+            granted.append(n)
+
+    old = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        threads = [threading.Thread(target=worker) for _ in range(16)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        sys.setswitchinterval(old)
+    assert sum(granted) == 1000
+    assert bucket.available == 0.0
