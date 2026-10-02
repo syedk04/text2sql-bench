@@ -1,0 +1,3 @@
+# keep generated JSON byte-identical across platforms
+manifests/*.json text eol=lf
+runs/** text eol=lf
