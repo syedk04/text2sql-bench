@@ -210,3 +210,14 @@ def test_retry_after_cap_is_configurable():
     assert sleeps == [30.0]
     with pytest.raises(ValueError):
         LLMClient(FakeProvider(["x"]), max_retry_after_s=float("inf"))
+
+
+@pytest.mark.parametrize("text", ["", "   \n"])
+def test_empty_completion_is_returned_but_not_cached(tmp_path, text):
+    cache = DiskCache(tmp_path)
+    provider = FakeProvider([text, "SELECT 1"])
+    client = LLMClient(provider, cache=cache)
+    assert client.complete(_req()).text == text
+    assert len(cache) == 0
+    assert client.complete(_req()).text == "SELECT 1"  # asked again, not served empty
+    assert provider.calls == 2

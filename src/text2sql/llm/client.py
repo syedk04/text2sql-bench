@@ -164,7 +164,9 @@ class LLMClient:
                 )
                 raise
 
-            if self.cache is not None:
+            # An empty answer is more likely a provider hiccup than a real
+            # reply, so it is returned but not cached.
+            if self.cache is not None and response.text.strip():
                 self.cache.put(key, request, response)
             if self.budget is not None:
                 self.budget.record(response.total_tokens)

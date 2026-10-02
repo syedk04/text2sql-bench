@@ -182,3 +182,7 @@ def test_directory_in_place_of_entry_is_a_miss(tmp_path):
     key = cache_key(_req())
     cache.path_for(key).mkdir(parents=True)
     assert cache.get(key) is None
+
+
+def test_negative_zero_temperature_shares_the_key():
+    assert cache_key(_req(temperature=-0.0)) == cache_key(_req(temperature=0.0))

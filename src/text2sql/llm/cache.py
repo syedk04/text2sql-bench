@@ -28,7 +28,8 @@ def cache_key(request: CompletionRequest) -> str:
         "v": KEY_VERSION,
         "model": request.model,
         "messages": [m.to_dict() for m in request.messages],
-        "temperature": request.temperature,
+        # + 0.0 turns -0.0 into 0.0 so the two spellings share an entry
+        "temperature": request.temperature + 0.0,
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
