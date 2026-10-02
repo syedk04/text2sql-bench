@@ -21,6 +21,29 @@ def _cmd_download_questions(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_download_dbs(args: argparse.Namespace) -> int:
+    from text2sql.data.databases import download_zip, extract_sqlite, list_databases
+
+    if args.zip:
+        zip_path = Path(args.zip)
+        if not zip_path.is_file():
+            print(f"zip not found: {zip_path}")
+            return 1
+    else:
+        zip_path = config.data_dir() / "raw" / "minidev.zip"
+        if not zip_path.is_file():
+            print(f"downloading minidev.zip (about 760 MiB) to {zip_path} ...")
+            download_zip(zip_path)
+    report = extract_sqlite(zip_path, config.bird_dir())
+    present = list_databases(config.databases_dir())
+    print(
+        f"databases: {len(report.databases)} in zip, {len(present)} on disk; "
+        f"{report.descriptions} description CSVs; legacy files: {', '.join(report.legacy)}; "
+        f"{report.skipped_existing} already up to date"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="text2sql", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -36,6 +59,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--dest", help="output path (default: data/bird/mini_dev_sqlite.json)")
     p.set_defaults(handler=_cmd_download_questions)
+
+    p = sub.add_parser(
+        "download-dbs",
+        help="extract the BIRD Mini-Dev SQLite databases from minidev.zip (downloads it if needed)",
+    )
+    p.add_argument("--zip", help="path to an already downloaded minidev.zip")
+    p.set_defaults(handler=_cmd_download_dbs)
 
     return parser
 
