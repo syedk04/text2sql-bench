@@ -27,6 +27,9 @@ from text2sql.sql.guard import UnsafeSQL, check_select_only
 Status = Literal["ok", "error", "timeout", "rejected"]
 # How many SQLite VM instructions run between deadline checks.
 PROGRESS_STEPS = 10_000
+# Largest string or blob a query may build (SQLite's default is 1 GB). Stops
+# printf/zeroblob/randomblob tricks from eating memory; BIRD values are tiny.
+MAX_VALUE_BYTES = 100_000_000
 
 # Authorizer actions that a pure query needs. Everything else (writes, DDL,
 # PRAGMA, ATTACH, transactions, ANALYZE, ...) is denied.
@@ -71,6 +74,7 @@ def open_readonly(db_path: str | Path) -> sqlite3.Connection:
     try:
         if hasattr(conn, "enable_load_extension"):
             conn.enable_load_extension(False)
+        conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MAX_VALUE_BYTES)
         conn.execute("PRAGMA query_only = ON")
         if conn.execute("PRAGMA query_only").fetchone()[0] != 1:
             raise ReadOnlyError("PRAGMA query_only did not take effect")
@@ -155,6 +159,11 @@ def execute(
             rows = cursor.fetchmany(row_limit + 1)
             truncated = len(rows) > row_limit
             rows = rows[:row_limit]
+        if time.monotonic() > deadline:
+            # A single expensive step (say, upper() on a huge string) can run
+            # long between progress-handler checks. The official scorer counts
+            # wall time, so a late finish is still a timeout.
+            return done("timeout", error=f"query finished after the {deadline - start:.1f}s limit")
         return done("ok", rows=rows, columns=columns, truncated=truncated)
     except Exception as exc:  # sqlite3 errors, decode errors, overflow, ...
         if timed_out:

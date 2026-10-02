@@ -116,3 +116,40 @@ def test_invalid_utf8_text_is_an_error_like_the_official_script(tmp_path):
     res = execute(bad, "SELECT s FROM t")
     assert res.status == "error"
     assert "decode" in res.error.lower()
+
+
+def test_query_that_finishes_late_counts_as_timeout(db, monkeypatch):
+    # One slow step can run past the deadline between progress checks; the
+    # result must still be a timeout, as under the official wall-clock limit.
+    import text2sql.sql.executor as executor
+
+    readings = iter([0.0, 0.0])
+
+    class Clock:
+        @staticmethod
+        def monotonic():
+            return next(readings, 10.0)
+
+    monkeypatch.setattr(executor, "time", Clock)
+    res = execute(db, "SELECT 1", timeout_s=2.5)
+    assert res.status == "timeout"
+    assert "after the 2.5s limit" in res.error
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT zeroblob(500000000)",
+        "SELECT length(printf('%.*c', 90000000, 'x') || printf('%.*c', 90000000, 'x'))",
+        "SELECT randomblob(200000000)",
+    ],
+)
+def test_huge_values_are_refused(db, sql):
+    res = execute(db, sql, timeout_s=10)
+    assert res.status == "error"
+    assert "too big" in res.error
+
+
+def test_oversized_printf_yields_null_not_a_huge_string(db):
+    res = execute(db, "SELECT length(printf('%.*c', 900000000, 'x'))", timeout_s=10)
+    assert res.ok and res.rows == [(None,)]
