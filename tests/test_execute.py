@@ -153,3 +153,24 @@ def test_huge_values_are_refused(db, sql):
 def test_oversized_printf_yields_null_not_a_huge_string(db):
     res = execute(db, "SELECT length(printf('%.*c', 900000000, 'x'))", timeout_s=10)
     assert res.ok and res.rows == [(None,)]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"timeout_s": float("nan")},
+        {"timeout_s": True},
+        {"timeout_s": "5"},
+        {"deadline": float("nan")},
+        {"row_limit": True},
+        {"row_limit": 2.5},
+        {"row_limit": "3"},
+    ],
+)
+def test_bad_arguments_are_bugs_not_results(db, kwargs):
+    with pytest.raises(ValueError):
+        execute(db, "SELECT 1", **kwargs)
+
+
+def test_infinite_timeout_is_allowed(db):
+    assert execute(db, "SELECT 1", timeout_s=float("inf")).ok

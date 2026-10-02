@@ -120,11 +120,21 @@ def execute(
     budget across several queries. ``row_limit=None`` fetches everything; with a
     limit, one extra row is requested to tell whether the result was cut off.
     """
+    if (
+        isinstance(timeout_s, bool)
+        or not isinstance(timeout_s, int | float)
+        or timeout_s != timeout_s  # nan
+    ):
+        raise ValueError(f"timeout_s must be a number, got {timeout_s!r}")
+    if deadline is not None and (not isinstance(deadline, int | float) or deadline != deadline):
+        raise ValueError(f"deadline must be a number, got {deadline!r}")
+    if row_limit is not None and (
+        isinstance(row_limit, bool) or not isinstance(row_limit, int) or row_limit < 0
+    ):
+        raise ValueError(f"row_limit must be an integer >= 0 or None, got {row_limit!r}")
     start = time.monotonic()
     if deadline is None:
         deadline = start + timeout_s
-    if row_limit is not None and row_limit < 0:
-        raise ValueError("row_limit must be >= 0 or None")
 
     def done(status: Status, **kw: Any) -> ExecResult:
         return ExecResult(status=status, elapsed_s=time.monotonic() - start, **kw)

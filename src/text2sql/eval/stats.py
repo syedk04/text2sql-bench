@@ -14,6 +14,11 @@ def wilson(k: int, n: int, z: float = Z95) -> tuple[float, float]:
     and n/n, which matters for small slices like the 10 hard questions in the
     dev manifest.
     """
+    for name, value in (("k", k), ("n", n)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{name} must be an integer, got {value!r}")
+    if isinstance(z, bool) or not isinstance(z, int | float) or not math.isfinite(z) or z <= 0:
+        raise ValueError(f"z must be a finite positive number, got {z!r}")
     if n < 0 or k < 0 or k > n:
         raise ValueError(f"need 0 <= k <= n, got k={k}, n={n}")
     if n == 0:

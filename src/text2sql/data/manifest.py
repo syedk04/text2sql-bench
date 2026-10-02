@@ -111,9 +111,11 @@ def load_manifest(path: str | Path) -> list[int]:
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
     try:
-        ids = [int(e["question_id"]) for e in data["questions"]]
+        ids = [e["question_id"] for e in data["questions"]]
     except (KeyError, TypeError, ValueError) as exc:
         raise ManifestError(f"malformed manifest {path}: {exc}") from exc
+    if any(isinstance(i, bool) or not isinstance(i, int) for i in ids):
+        raise ManifestError(f"malformed manifest {path}: question ids must be integers")
     if len(set(ids)) != len(ids):
         raise ManifestError(f"duplicate question ids in manifest {path}")
     if data.get("n") is not None and data["n"] != len(ids):

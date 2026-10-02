@@ -53,3 +53,15 @@ def test_agrees_with_direct_quadratic_solution():
             lo, hi = wilson(k, n)
             assert lo == pytest.approx(max(0.0, (-b - disc) / (2 * a)), abs=1e-9)
             assert hi == pytest.approx(min(1.0, (-b + disc) / (2 * a)), abs=1e-9)
+
+
+@pytest.mark.parametrize("z", [0, -1.96, float("nan"), float("inf"), True, "1.96"])
+def test_bad_z(z):
+    with pytest.raises(ValueError, match="z must be"):
+        wilson(5, 10, z)
+
+
+@pytest.mark.parametrize("k, n", [(2.5, 5), (True, 2), (1, 2.0), ("1", 2)])
+def test_non_integer_counts(k, n):
+    with pytest.raises(ValueError, match="must be an integer"):
+        wilson(k, n)

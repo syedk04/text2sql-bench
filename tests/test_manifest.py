@@ -121,3 +121,11 @@ def test_cli_build_manifest(tmp_path, capsys):
     assert data["n"] == 50
     assert len(data["source"]["sha256"]) == 64
     assert "wrote 50" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bad_id", ["5", 5.0, 5.7, True, None])
+def test_load_manifest_rejects_non_integer_ids(tmp_path, bad_id):
+    path = tmp_path / "m.json"
+    path.write_text(json.dumps({"questions": [{"question_id": bad_id}]}))
+    with pytest.raises(ManifestError):
+        load_manifest(path)
