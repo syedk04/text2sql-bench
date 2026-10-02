@@ -14,6 +14,7 @@ SCHEMAS: dict[str, list[str]] = {
         "INSERT INTO item (name, price, category) VALUES "
         "('apple', 1.5, 'fruit'), ('melon', 6.0, 'fruit'), ('soap', 7.25, 'home'), "
         "('broom', 12.0, 'home'), ('pen', 2.0, 'office')",
+        "CREATE INDEX item_category ON item (category)",
     ],
     "school": [
         "CREATE TABLE student (id INTEGER PRIMARY KEY, name TEXT, grade INTEGER, score REAL)",
