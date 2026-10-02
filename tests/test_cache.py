@@ -111,3 +111,22 @@ def test_replace_gives_up_quietly_if_entry_exists(tmp_path, monkeypatch):
 def test_default_dir_follows_data_dir(monkeypatch, tmp_path):
     monkeypatch.setenv(config.DATA_DIR_ENV, str(tmp_path))
     assert default_cache_dir() == tmp_path.resolve() / "cache" / "llm"
+
+
+def test_temp_file_name_is_short(tmp_path, monkeypatch):
+    # The final path is root/xx/<64 hex>.json; the temp file next to it must not
+    # be longer, or deep folders on Windows hit the 260-character path limit.
+    seen = []
+    real_replace = os.replace
+
+    def spy(src, dst):
+        seen.append((str(src), str(dst)))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", spy)
+    cache = DiskCache(tmp_path)
+    req = _req()
+    cache.put(cache_key(req), req, CompletionResponse("x"))
+    src, dst = seen[0]
+    assert len(src) <= len(dst)
+    assert os.path.dirname(src) == os.path.dirname(dst)

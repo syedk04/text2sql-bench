@@ -84,7 +84,9 @@ class DiskCache:
             },
             "response": asdict(response),
         }
-        tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        # Short temp name: the 64-character key plus pid and uuid pushed deep
+        # cache folders past the 260-character Windows path limit.
+        tmp = path.with_name(f"tmp-{uuid.uuid4().hex[:8]}.tmp")
         tmp.write_text(json.dumps(entry, ensure_ascii=False, indent=1), encoding="utf-8")
         self._replace(tmp, path)
         return path
