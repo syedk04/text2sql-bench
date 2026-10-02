@@ -1,0 +1,98 @@
+[
+  {
+    "question_id": 100,
+    "db_id": "shop",
+    "question": "Synthetic question 100 about shop?",
+    "evidence": "made-up hint",
+    "SQL": "SELECT COUNT(*) FROM item",
+    "difficulty": "simple"
+  },
+  {
+    "question_id": 101,
+    "db_id": "shop",
+    "question": "Synthetic question 101 about shop?",
+    "evidence": "",
+    "SQL": "SELECT name FROM item WHERE price > 5 ORDER BY name",
+    "difficulty": "moderate"
+  },
+  {
+    "question_id": 102,
+    "db_id": "shop",
+    "question": "Synthetic question 102 about shop?",
+    "evidence": "made-up hint",
+    "SQL": "SELECT category, AVG(price) FROM item GROUP BY category",
+    "difficulty": "challenging"
+  },
+  {
+    "question_id": 103,
+    "db_id": "shop",
+    "question": "Synthetic question 103 about shop?",
+    "evidence": "",
+    "SQL": "SELECT MAX(price) FROM item",
+    "difficulty": "simple"
+  },
+  {
+    "question_id": 104,
+    "db_id": "school",
+    "question": "Synthetic question 104 about school?",
+    "evidence": "made-up hint",
+    "SQL": "SELECT COUNT(*) FROM student",
+    "difficulty": "simple"
+  },
+  {
+    "question_id": 105,
+    "db_id": "school",
+    "question": "Synthetic question 105 about school?",
+    "evidence": "",
+    "SQL": "SELECT name FROM student WHERE grade = 10",
+    "difficulty": "moderate"
+  },
+  {
+    "question_id": 106,
+    "db_id": "school",
+    "question": "Synthetic question 106 about school?",
+    "evidence": "made-up hint",
+    "SQL": "SELECT grade, COUNT(*) FROM student GROUP BY grade",
+    "difficulty": "moderate"
+  },
+  {
+    "question_id": 107,
+    "db_id": "school",
+    "question": "Synthetic question 107 about school?",
+    "evidence": "",
+    "SQL": "SELECT name FROM student ORDER BY score DESC LIMIT 1",
+    "difficulty": "challenging"
+  },
+  {
+    "question_id": 108,
+    "db_id": "zoo",
+    "question": "Synthetic question 108 about zoo?",
+    "evidence": "made-up hint",
+    "SQL": "SELECT COUNT(*) FROM animal",
+    "difficulty": "simple"
+  },
+  {
+    "question_id": 109,
+    "db_id": "zoo",
+    "question": "Synthetic question 109 about zoo?",
+    "evidence": "",
+    "SQL": "SELECT species FROM animal WHERE legs = 4",
+    "difficulty": "moderate"
+  },
+  {
+    "question_id": 110,
+    "db_id": "zoo",
+    "question": "Synthetic question 110 about zoo?",
+    "evidence": "made-up hint",
+    "SQL": "SELECT species, COUNT(*) FROM animal GROUP BY species HAVING COUNT(*) > 1",
+    "difficulty": "challenging"
+  },
+  {
+    "question_id": 111,
+    "db_id": "zoo",
+    "question": "Synthetic question 111 about zoo?",
+    "evidence": "",
+    "SQL": "SELECT name FROM animal WHERE legs = 2",
+    "difficulty": "moderate"
+  }
+]
