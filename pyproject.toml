@@ -41,4 +41,5 @@ select = ["E", "F", "I", "UP", "B"]
 testpaths = ["tests"]
 markers = [
     "bird: needs the real BIRD Mini-Dev data under data/ (skipped when missing)",
+    "slow: full-benchmark gate taking minutes (skipped unless --run-slow)",
 ]

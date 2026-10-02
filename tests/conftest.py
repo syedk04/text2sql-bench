@@ -18,13 +18,27 @@ def bird_data_present() -> bool:
     return t2s_config.databases_dir().is_dir() and t2s_config.questions_path().is_file()
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-slow",
+        action="store_true",
+        default=False,
+        help="also run the slow full-benchmark gates (minutes, need real BIRD data)",
+    )
+
+
 def pytest_collection_modifyitems(config, items):
-    if bird_data_present():
-        return
-    skip = pytest.mark.skip(reason="real BIRD data not found under data/bird (run download-dbs)")
+    have_data = bird_data_present()
+    run_slow = config.getoption("--run-slow")
+    skip_data = pytest.mark.skip(
+        reason="real BIRD data not found under data/bird (run download-dbs)"
+    )
+    skip_slow = pytest.mark.skip(reason="slow gate; run with --run-slow")
     for item in items:
-        if "bird" in item.keywords:
-            item.add_marker(skip)
+        if "bird" in item.keywords and not have_data:
+            item.add_marker(skip_data)
+        elif "slow" in item.keywords and not run_slow:
+            item.add_marker(skip_slow)
 
 
 @pytest.fixture

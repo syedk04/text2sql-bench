@@ -116,6 +116,35 @@ def _cmd_eval_preds(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_gate_gold(args: argparse.Namespace) -> int:
+    from text2sql.data.bird import load_questions
+    from text2sql.data.manifest import load_manifest
+    from text2sql.eval.gates import gate_gold
+
+    qpath = Path(args.questions) if args.questions else config.questions_path()
+    questions = load_questions(qpath)
+    if args.manifest:
+        wanted = set(load_manifest(args.manifest))
+        questions = [q for q in questions if q.question_id in wanted]
+
+    def progress(done: int, total: int, _r: object) -> None:
+        if done % 50 == 0 or done == total:
+            print(f"  checked {done}/{total}", flush=True)
+
+    import sqlite3
+
+    report = gate_gold(questions, timeout_s=args.timeout, progress=progress)
+    print(
+        f"gold vs gold: {report.passed}/{report.n} correct "
+        f"(timeout {args.timeout:g}s, SQLite {sqlite3.sqlite_version})"
+    )
+    for r in report.failures:
+        print(f"  FAIL question {r.question_id} ({r.db_id}): {r.error}")
+    print("slowest: " + ", ".join(f"{r.question_id}={r.elapsed_s:.1f}s" for r in report.slowest))
+    print("GATE PASSED" if report.ok else "GATE FAILED")
+    return 0 if report.ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="text2sql", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -156,6 +185,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=30.0, help="seconds per question")
     p.add_argument("--out", help="optional JSONL file for per-question results")
     p.set_defaults(handler=_cmd_eval_preds)
+
+    p = sub.add_parser("gate-gold", help="score every gold query against itself (must be 100%%)")
+    p.add_argument("--questions", help="question file (default: data/bird/mini_dev_sqlite.json)")
+    p.add_argument("--manifest", help="only check the questions listed in this manifest")
+    p.add_argument("--timeout", type=float, default=30.0, help="seconds per question")
+    p.set_defaults(handler=_cmd_gate_gold)
 
     return parser
 
