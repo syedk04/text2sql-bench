@@ -1,8 +1,14 @@
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
-from text2sql.llm.ratelimit import DailyTokenBudget, TokenBucket, parse_retry_after
+from text2sql.llm.ratelimit import (
+    BudgetStateError,
+    DailyTokenBudget,
+    TokenBucket,
+    parse_retry_after,
+)
 from text2sql.llm.types import BudgetExceeded
 
 
@@ -89,8 +95,6 @@ def test_budget_persists_across_instances_same_day(tmp_path):
     assert b.used == 60
     c = DailyTokenBudget(100, path, today=lambda: "2026-10-03")
     assert c.used == 0
-    path.write_text("{corrupt", encoding="utf-8")
-    assert DailyTokenBudget(100, path, today=lambda: "2026-10-02").used == 0
 
 
 def test_budget_rejects_bad_limit():
@@ -141,3 +145,94 @@ def test_parse_retry_after_is_strict_and_clamped(header, expected):
 def test_parse_retry_after_custom_cap():
     assert parse_retry_after("120", now=NOW, max_s=60) == 60
     assert parse_retry_after("Fri, 02 Oct 2026 12:10:00 GMT", now=NOW, max_s=60) == 60
+
+
+def test_two_instances_share_spend(tmp_path):
+    path = tmp_path / "budget.json"
+    a = DailyTokenBudget(100, path, today=lambda: "2026-10-02")
+    b = DailyTokenBudget(100, path, today=lambda: "2026-10-02")
+    a.record(60)
+    b.record(60)
+    assert a.used == b.used == 120
+    with pytest.raises(BudgetExceeded):
+        b.check(0)
+    assert not list(tmp_path.glob("*.tmp")) and not list(tmp_path.glob("*.lock"))
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"[1, 2]",
+        bytes([0xFF, 0xFE]),
+        b"{corrupt",
+        b'{"day": "2026-10-02", "used": "lots"}',
+        b'{"day": "2026-10-02", "used": null}',
+        b'{"day": "2026-10-02", "used": -1000}',
+        b'{"day": "2026-10-02", "used": true}',
+        b'{"used": 5}',
+    ],
+)
+def test_corrupt_budget_file_fails_safe(tmp_path, content):
+    path = tmp_path / "budget.json"
+    path.write_bytes(content)
+    budget = DailyTokenBudget(100, path, today=lambda: "2026-10-02")
+    with pytest.raises(BudgetStateError, match="budget file"):
+        budget.check(1)
+    with pytest.raises(BudgetStateError):
+        budget.record(1)
+    assert issubclass(BudgetStateError, BudgetExceeded)
+    assert path.read_bytes() == content  # never silently overwritten
+
+
+def test_record_rejects_non_int():
+    budget = DailyTokenBudget(100)
+    with pytest.raises(TypeError):
+        budget.record(1.5)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        DailyTokenBudget(True)  # type: ignore[arg-type]
+
+
+def test_concurrent_threads_lose_nothing(tmp_path):
+    import threading
+
+    path = tmp_path / "budget.json"
+    budgets = [DailyTokenBudget(10**9, path, today=lambda: "2026-10-02") for _ in range(4)]
+
+    def work(b):
+        for _ in range(50):
+            b.record(1)
+
+    threads = [threading.Thread(target=work, args=(budgets[i % 4],)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert budgets[0].used == 400
+
+
+def _record_in_process(path: str, n: int) -> None:
+    budget = DailyTokenBudget(10**9, Path(path), today=lambda: "2026-10-02")
+    for _ in range(n):
+        budget.record(1)
+
+
+def test_concurrent_processes_lose_nothing(tmp_path):
+    from concurrent.futures import ProcessPoolExecutor
+
+    path = tmp_path / "budget.json"
+    with ProcessPoolExecutor(3) as pool:
+        list(pool.map(_record_in_process, [str(path)] * 3, [40] * 3))
+    assert DailyTokenBudget(10**9, path, today=lambda: "2026-10-02").used == 120
+
+
+def test_stale_lock_file_is_cleared(tmp_path):
+    import os
+    import time
+
+    path = tmp_path / "budget.json"
+    lock = tmp_path / "budget.json.lock"
+    lock.write_text("12345")
+    old = time.time() - 3600
+    os.utime(lock, (old, old))
+    DailyTokenBudget(100, path, today=lambda: "2026-10-02").record(5)
+    assert not lock.exists()
