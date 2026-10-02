@@ -4,7 +4,8 @@ Generated SQL must never be able to change a database. Each layer below would
 be enough on its own for ordinary writes; they are stacked so a gap in one does
 not matter:
 
-1. the file is opened through a ``mode=ro`` URI, so SQLite refuses to write it;
+1. the file is opened through a ``mode=ro&immutable=1`` URI, so SQLite refuses to
+   write it and leaves no side files next to it;
 2. ``PRAGMA query_only = ON`` rejects any statement that would write;
 3. an authorizer callback allows only reads, function calls and recursive CTEs,
    and is installed after the pragma so nothing can switch the pragma back off.
@@ -62,7 +63,11 @@ def _authorizer(
 def readonly_uri(db_path: str | Path) -> str:
     # as_uri() percent-encodes spaces and other characters, which SQLite's URI
     # parser decodes again; plain string paths with spaces would not survive.
-    return Path(db_path).resolve().as_uri() + "?mode=ro"
+    # immutable=1 tells SQLite the file cannot change, so it takes no locks and,
+    # for WAL-mode databases (card_games is one), creates no -wal/-shm files
+    # next to it. That holds for the benchmark databases; do not point this at
+    # a database something else is writing to.
+    return Path(db_path).resolve().as_uri() + "?mode=ro&immutable=1"
 
 
 def open_readonly(db_path: str | Path) -> sqlite3.Connection:

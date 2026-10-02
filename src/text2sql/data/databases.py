@@ -107,7 +107,9 @@ def list_databases(db_root: Path) -> list[str]:
 
 def table_names(db_file: Path) -> list[str]:
     """Open a database read-only and list its tables (a cheap integrity check)."""
-    uri = db_file.resolve().as_uri() + "?mode=ro"
+    from text2sql.sql.executor import readonly_uri
+
+    uri = readonly_uri(db_file)
     conn = sqlite3.connect(uri, uri=True)
     try:
         rows = conn.execute(

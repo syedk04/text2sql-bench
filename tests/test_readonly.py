@@ -42,7 +42,7 @@ def db(tmp_path):
 
 def test_uri_handles_spaces(db):
     uri = readonly_uri(db)
-    assert uri.startswith("file:") and uri.endswith("?mode=ro")
+    assert uri.startswith("file:") and uri.endswith("?mode=ro&immutable=1")
     assert " " not in uri
 
 
@@ -97,3 +97,26 @@ def test_missing_file_is_not_created(tmp_path):
     with pytest.raises(ReadOnlyError):
         open_readonly(target)
     assert not target.exists()
+
+
+def test_wal_mode_database_gets_no_side_files(tmp_path):
+    import sqlite3 as sq
+
+    path = tmp_path / "wal db" / "w.sqlite"
+    path.parent.mkdir()
+    conn = sq.connect(path)
+    assert conn.execute("PRAGMA journal_mode = WAL").fetchone() == ("wal",)
+    conn.execute("CREATE TABLE t (a)")
+    conn.execute("INSERT INTO t VALUES (1), (2)")
+    conn.commit()
+    conn.close()
+    assert sorted(p.name for p in path.parent.iterdir()) == ["w.sqlite"]
+    before = path.read_bytes()
+
+    from text2sql.sql.executor import execute
+
+    res = execute(path, "SELECT SUM(a) FROM t")
+    assert res.ok and res.rows == [(3,)]
+    assert execute(path, "DELETE FROM t", guard=False).status == "error"
+    assert sorted(p.name for p in path.parent.iterdir()) == ["w.sqlite"]
+    assert path.read_bytes() == before
