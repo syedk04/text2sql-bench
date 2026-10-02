@@ -145,6 +145,79 @@ def _cmd_gate_gold(args: argparse.Namespace) -> int:
     return 0 if report.ok else 1
 
 
+def _cmd_gate_official(args: argparse.Namespace) -> int:
+    import json
+
+    from text2sql.data.bird import load_questions
+    from text2sql.eval.ex import load_official_predictions, score_many
+    from text2sql.eval.official import (
+        BASELINES,
+        compare_vectors,
+        fetch_baseline,
+        official_dir,
+        run_official,
+        write_gold_inputs,
+    )
+
+    baseline = BASELINES[args.baseline]
+    label = "legacy" if args.legacy else "hf"
+    workdir = official_dir() / "runs" / f"{baseline.name}-{label}"
+    if args.legacy:
+        legacy = config.bird_dir() / "legacy"
+        questions = load_questions(legacy / "mini_dev_sqlite.json", expect_total=500)
+        gold_path = legacy / "mini_dev_sqlite_gold.sql"
+        gold_source = "zip legacy files"
+    else:
+        questions = load_questions(config.questions_path(), expect_total=500)
+        gold_path, _ = write_gold_inputs(questions, workdir)
+        gold_source = "pinned Hugging Face file"
+    pred_path = fetch_baseline(baseline.name)
+    preds = load_official_predictions(pred_path)
+    if len(preds) != len(questions):
+        print(f"error: baseline has {len(preds)} entries, expected {len(questions)}")
+        return 1
+
+    print(f"official scorer on {baseline.name} ({gold_source}), one worker, {args.timeout:g}s ...")
+    official = run_official(pred_path, gold_path, timeout_s=args.timeout)
+    print("our scorer ...", flush=True)
+    ours_results = score_many(questions, [p.sql for p in preds], timeout_s=args.timeout)
+    agreement = compare_vectors(baseline.name, official, [r.correct for r in ours_results])
+
+    print(f"official EX {agreement.official_ex:.2f}  ours EX {agreement.ours_ex:.2f}  "
+          f"published {baseline.published_ex:.2f}")
+    print(f"agreement: {agreement.n - len(agreement.disagreements)}/{agreement.n}")
+    for i in agreement.disagreements:
+        r = ours_results[i]
+        print(f"  position {i} question {r.question_id}: official={official[i]} "
+              f"ours={r.correct} ({r.pred_status}/{r.gold_status}) {r.error or ''}")
+    workdir.mkdir(parents=True, exist_ok=True)
+    report_path = workdir / "agreement.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "baseline": baseline.name,
+                "gold": gold_source,
+                "timeout_s": args.timeout,
+                "official_ex": agreement.official_ex,
+                "ours_ex": agreement.ours_ex,
+                "published_ex": baseline.published_ex,
+                "disagreements": agreement.disagreements,
+                "official": official,
+                "ours": [r.__dict__ for r in ours_results],
+            },
+            indent=1,
+        ),
+        encoding="utf-8",
+    )
+    print(f"details: {report_path}")
+    if args.legacy:
+        delta = agreement.official_ex - baseline.published_ex
+        verdict = "within" if abs(delta) <= 1.0 else "OUTSIDE"
+        print(f"Gate B (advisory): official reproduction {delta:+.2f} points, {verdict} +-1.0")
+    print("GATE A PASSED" if agreement.ok else "GATE A FAILED")
+    return 0 if agreement.ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="text2sql", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -191,6 +264,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--manifest", help="only check the questions listed in this manifest")
     p.add_argument("--timeout", type=float, default=30.0, help="seconds per question")
     p.set_defaults(handler=_cmd_gate_gold)
+
+    from text2sql.eval.official import BASELINES
+
+    p = sub.add_parser(
+        "gate-official",
+        help="check our scorer against the official BIRD script on a published baseline",
+    )
+    p.add_argument("--baseline", choices=sorted(BASELINES), default="gpt-4")
+    p.add_argument(
+        "--legacy",
+        action="store_true",
+        help="score against the zip's original gold files (Gate B, reproduces published EX)",
+    )
+    p.add_argument("--timeout", type=float, default=30.0, help="seconds per question")
+    p.set_defaults(handler=_cmd_gate_official)
 
     return parser
 
