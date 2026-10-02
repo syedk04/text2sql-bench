@@ -7,8 +7,8 @@ can drive time by hand instead of waiting.
 from __future__ import annotations
 
 import json
-import math
 import os
+import re
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -131,26 +131,39 @@ class DailyTokenBudget:
             os.replace(tmp, self.path)
 
 
-def parse_retry_after(value: str | None, now: datetime | None = None) -> float | None:
-    """Parse an HTTP Retry-After header: delay-seconds or an HTTP-date."""
+MAX_RETRY_AFTER_S = 300.0
+_DELAY_SECONDS = re.compile(r"[0-9]+(?:\.[0-9]+)?")
+
+
+def parse_retry_after(
+    value: str | None, now: datetime | None = None, *, max_s: float = MAX_RETRY_AFTER_S
+) -> float | None:
+    """Parse an HTTP Retry-After header (delay-seconds or an HTTP-date).
+
+    Returns seconds clamped to ``[0, max_s]``, or None when the header is
+    missing or not one of the two valid forms. Plain digits only for the
+    numeric form: no sign, exponent, underscore, inf or nan. A very long or
+    far-future value is clamped rather than trusted, so a bad header can never
+    park a run for days.
+    """
     if value is None:
         return None
     value = value.strip()
     if not value:
         return None
-    try:
-        seconds = float(value)
-    except ValueError:
-        pass
-    else:
-        return seconds if math.isfinite(seconds) and seconds >= 0 else None
+    if _DELAY_SECONDS.fullmatch(value):
+        return min(float(value), max_s)
     try:
         when = parsedate_to_datetime(value)
-    except (TypeError, ValueError, IndexError):
+    except (TypeError, ValueError, IndexError, OverflowError):
         return None
     if when is None:
         return None
     if when.tzinfo is None:
         when = when.replace(tzinfo=UTC)
     now = now or datetime.now(UTC)
-    return max(0.0, (when - now).total_seconds())
+    try:
+        delay = (when - now).total_seconds()
+    except OverflowError:
+        return max_s
+    return min(max(0.0, delay), max_s)

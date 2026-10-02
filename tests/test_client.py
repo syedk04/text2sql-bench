@@ -178,3 +178,35 @@ def test_corrupt_cache_entry_falls_back_to_provider(tmp_path, content):
     assert client.complete(req).text == "SELECT 9"
     assert provider.calls == 1
     assert cache.get(cache_key(req)).text == "SELECT 9"  # repaired
+
+
+@pytest.mark.parametrize(
+    "retry_after, expect_exact",
+    [(86400 * 7, 300.0), (float("inf"), None), (float("nan"), None), (-1, None), (12, 12.0)],
+)
+def test_provider_retry_after_is_sanitised(retry_after, expect_exact):
+    sleeps = []
+    client = LLMClient(
+        FakeProvider([RateLimitError(retry_after=retry_after), "ok"]),
+        sleep=sleeps.append,
+        rng=random.Random(0),
+    )
+    assert client.complete(_req()).text == "ok"
+    assert len(sleeps) == 1
+    if expect_exact is not None:
+        assert sleeps[0] == expect_exact
+    else:  # fell back to jittered backoff for the first retry
+        assert 0.0 <= sleeps[0] <= 2.0
+
+
+def test_retry_after_cap_is_configurable():
+    sleeps = []
+    client = LLMClient(
+        FakeProvider([RateLimitError(retry_after=100), "ok"]),
+        sleep=sleeps.append,
+        max_retry_after_s=30,
+    )
+    client.complete(_req())
+    assert sleeps == [30.0]
+    with pytest.raises(ValueError):
+        LLMClient(FakeProvider(["x"]), max_retry_after_s=float("inf"))

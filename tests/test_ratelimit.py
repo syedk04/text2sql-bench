@@ -118,3 +118,26 @@ NOW = datetime(2026, 10, 2, 12, 0, 0, tzinfo=UTC)
 )
 def test_parse_retry_after(header, expected):
     assert parse_retry_after(header, now=NOW) == expected
+
+
+@pytest.mark.parametrize(
+    "header, expected",
+    [
+        ("1_000", None),
+        ("1e3", None),
+        ("+5", None),
+        ("nan", None),
+        ("99999999999999999999", 300.0),
+        ("1e400", None),
+        ("86400", 300.0),
+        ("Sat, 01 Jan 9999 00:00:00 GMT", 300.0),
+        ("Fri, 02 Oct 2026 12:00:30 +0200", 0.0),  # 10:00:30 UTC, already past
+    ],
+)
+def test_parse_retry_after_is_strict_and_clamped(header, expected):
+    assert parse_retry_after(header, now=NOW) == expected
+
+
+def test_parse_retry_after_custom_cap():
+    assert parse_retry_after("120", now=NOW, max_s=60) == 60
+    assert parse_retry_after("Fri, 02 Oct 2026 12:10:00 GMT", now=NOW, max_s=60) == 60

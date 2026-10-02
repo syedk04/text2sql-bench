@@ -17,6 +17,7 @@ Clock, sleep and random source are injectable so tests run instantly.
 
 from __future__ import annotations
 
+import math
 import random
 import time
 from collections.abc import Callable
@@ -52,6 +53,7 @@ class LLMClient:
         budget: DailyTokenBudget | None = None,
         logger: CallLogger | None = None,
         max_attempts: int = 6,
+        max_retry_after_s: float = 300.0,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         rng: random.Random | None = None,
@@ -64,14 +66,25 @@ class LLMClient:
         self.budget = budget
         self.logger = logger
         self.max_attempts = max_attempts
+        if not math.isfinite(max_retry_after_s) or max_retry_after_s < 0:
+            raise ValueError("max_retry_after_s must be a finite number >= 0")
+        self.max_retry_after_s = float(max_retry_after_s)
         self._clock = clock
         self._sleep = sleep
         self._rng = rng or random.Random()
 
     def backoff(self, attempt: int, retry_after: float | None) -> float:
-        """Delay before retry number ``attempt`` (0-based)."""
-        if retry_after is not None and retry_after >= 0:
-            return float(retry_after)
+        """Delay before retry number ``attempt`` (0-based).
+
+        A provider-supplied ``retry_after`` is used when it is a sane number,
+        capped at ``max_retry_after_s``; otherwise full-jitter backoff applies.
+        """
+        if (
+            isinstance(retry_after, int | float)
+            and math.isfinite(retry_after)
+            and retry_after >= 0
+        ):
+            return min(float(retry_after), self.max_retry_after_s)
         return self._rng.uniform(0.0, min(MAX_BACKOFF_S, BASE_BACKOFF_S * 2**attempt))
 
     def _log(self, **fields: object) -> None:
