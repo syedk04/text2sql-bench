@@ -218,6 +218,25 @@ def _cmd_gate_official(args: argparse.Namespace) -> int:
     return 0 if agreement.ok else 1
 
 
+def _cmd_update_readme(args: argparse.Namespace) -> int:
+    from text2sql.results.report import render_markdown, replace_between_markers, update_readme
+    from text2sql.results.store import list_runs, read_run, runs_dir
+
+    root = Path(args.runs_dir) if args.runs_dir else runs_dir()
+    readme = Path(args.readme) if args.readme else config.PROJECT_ROOT / "README.md"
+    runs = [read_run(p) for p in list_runs(root)]
+    if args.check:
+        text = readme.read_text(encoding="utf-8")
+        if replace_between_markers(text, render_markdown(runs)) != text:
+            print(f"{readme} results table is out of date; run `text2sql update-readme`")
+            return 1
+        print(f"{readme} is up to date ({len(runs)} run(s))")
+        return 0
+    changed = update_readme(readme, runs)
+    print(f"{'updated' if changed else 'unchanged'}: {readme} ({len(runs)} run(s))")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="text2sql", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -279,6 +298,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--timeout", type=float, default=30.0, help="seconds per question")
     p.set_defaults(handler=_cmd_gate_official)
+
+    p = sub.add_parser("update-readme", help="rewrite the README results table from runs/")
+    p.add_argument("--runs-dir", help="folder of runs (default: runs/)")
+    p.add_argument("--readme", help="README to update (default: README.md)")
+    p.add_argument("--check", action="store_true", help="only check the table is current")
+    p.set_defaults(handler=_cmd_update_readme)
 
     return parser
 
