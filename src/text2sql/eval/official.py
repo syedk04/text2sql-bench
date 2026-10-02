@@ -206,15 +206,42 @@ def run_official(
     gt_queries, db_paths = utils.package_sqls(str(gold_path), db_root_str, mode="gt")
     pairs = list(zip(pred_queries, gt_queries))  # noqa: B905 - official truncation semantics
     ex.exec_result = []  # type: ignore[attr-defined]  # set by the script's __main__
-    ex.run_sqls_parallel(
-        pairs, db_places=db_paths, num_cpus=1, meta_time_out=timeout_s, sql_dialect="SQLite"
-    )
+    try:
+        ex.run_sqls_parallel(
+            pairs, db_places=db_paths, num_cpus=1, meta_time_out=timeout_s, sql_dialect="SQLite"
+        )
+    finally:
+        remove_wal_leftovers(sorted({Path(p) for p in db_paths}))
     results = utils.sort_results(ex.exec_result)
     if [r["sql_idx"] for r in results] != list(range(len(pairs))):
         raise OfficialError(
             f"official run returned {len(results)} results for {len(pairs)} pairs"
         )
     return [int(r["res"]) for r in results]
+
+
+def remove_wal_leftovers(db_files: Sequence[Path]) -> list[Path]:
+    """Delete the -wal/-shm files the official script leaves next to WAL-mode
+    databases (it opens them read-write with a plain ``sqlite3.connect``).
+
+    Only an empty -wal is removed, together with its -shm; a non-empty -wal
+    would hold real changes and is left alone. Returns the files removed.
+    """
+    removed: list[Path] = []
+    for db in db_files:
+        wal = db.with_name(db.name + "-wal")
+        shm = db.with_name(db.name + "-shm")
+        if wal.exists() and wal.stat().st_size > 0:
+            continue
+        for side in (wal, shm):
+            try:
+                side.unlink()
+                removed.append(side)
+            except FileNotFoundError:
+                pass
+            except PermissionError:  # still open somewhere; leave it
+                pass
+    return removed
 
 
 @dataclass

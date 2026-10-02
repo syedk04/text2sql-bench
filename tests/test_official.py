@@ -183,3 +183,30 @@ def test_missing_func_timeout_is_explained(tmp_path, monkeypatch):
     )
     with pytest.raises(OfficialError, match="uv sync --group official"):
         load_official(tmp_path, fetch=True)
+
+
+def test_official_run_cleans_up_wal_side_files(synthetic_data_dir, fake_official, tmp_path):
+    # The official workers open databases read-write and can be shut down with
+    # connections still open, which leaves empty -wal/-shm files behind.
+    db = config.db_path("zoo")
+    q = Question(1, "zoo", "q", "", "SELECT COUNT(*) FROM animal", "simple")
+    gold, _ = write_gold_inputs([q], tmp_path / "w")
+    preds = _preds(tmp_path / "p.json", [q])
+    db.with_name(db.name + "-wal").write_bytes(b"")
+    db.with_name(db.name + "-shm").write_bytes(bytes(32))
+    assert run_official(preds, gold, root=fake_official, fetch=False) == [1]
+    assert sorted(p.name for p in db.parent.iterdir()) == [db.name]
+
+
+def test_remove_wal_leftovers_keeps_non_empty_wal(tmp_path):
+    from text2sql.eval.official import remove_wal_leftovers
+
+    db = tmp_path / "a.sqlite"
+    db.write_bytes(b"")
+    (tmp_path / "a.sqlite-wal").write_bytes(b"pending changes")
+    (tmp_path / "a.sqlite-shm").write_bytes(b"x")
+    assert remove_wal_leftovers([db]) == []
+    assert (tmp_path / "a.sqlite-wal").exists()
+    (tmp_path / "a.sqlite-wal").write_bytes(b"")
+    assert len(remove_wal_leftovers([db])) == 2
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.sqlite"]
