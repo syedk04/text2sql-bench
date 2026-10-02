@@ -12,9 +12,11 @@ README table without re-running anything.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import subprocess
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
@@ -91,15 +93,54 @@ def runs_dir() -> Path:
     return config.PROJECT_ROOT / "runs"
 
 
-def _from_dict(cls: type, data: dict[str, Any], where: str) -> Any:
+def _is_int(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _is_number(v: Any) -> bool:
+    return (_is_int(v) or isinstance(v, float)) and math.isfinite(v)
+
+
+# Per-field checks: (description, predicate). Fields not listed must be str.
+_CHECKS: dict[str, tuple[str, Callable[[Any], bool]]] = {
+    "question_id": ("an integer", _is_int),
+    "correct": ("0 or 1 (or a boolean)", lambda v: isinstance(v, int) and v in (0, 1)),
+    "pred_sql": ("a string or null", lambda v: v is None or isinstance(v, str)),
+    "error": ("a string or null", lambda v: v is None or isinstance(v, str)),
+    "manifest_sha": ("a string or null", lambda v: v is None or isinstance(v, str)),
+    "code_git_sha": ("a string or null", lambda v: v is None or isinstance(v, str)),
+    "prompt_tokens": ("a non-negative integer", lambda v: _is_int(v) and v >= 0),
+    "completion_tokens": ("a non-negative integer", lambda v: _is_int(v) and v >= 0),
+    "calls": ("a non-negative integer", lambda v: _is_int(v) and v >= 0),
+    "latency_s": ("a non-negative number", lambda v: _is_number(v) and v >= 0),
+    "cost_usd": ("a non-negative number", lambda v: _is_number(v) and v >= 0),
+}
+
+
+def _from_dict(cls: type, data: Any, where: str) -> Any:
+    if not isinstance(data, dict):
+        raise StoreError(f"{where}: expected a JSON object, got {type(data).__name__}")
     names = {f.name for f in fields(cls)}
     unknown = set(data) - names
     if unknown:
         raise StoreError(f"{where}: unknown fields {sorted(unknown)}")
+    for key, value in data.items():
+        what, ok = _CHECKS.get(key, ("a string", lambda v: isinstance(v, str)))
+        if not ok(value):
+            raise StoreError(f"{where}: field {key!r} must be {what}, got {value!r}")
+    if "correct" in data:
+        data = {**data, "correct": int(data["correct"])}
     try:
         return cls(**data)
     except TypeError as exc:
         raise StoreError(f"{where}: {exc}") from exc
+
+
+def _load_json(text: str, where: str) -> Any:
+    try:
+        return json.loads(text)
+    except ValueError as exc:
+        raise StoreError(f"{where}: not valid JSON ({exc})") from exc
 
 
 def write_run(run: Run, directory: Path) -> Path:
@@ -126,7 +167,9 @@ def read_run(directory: Path) -> Run:
     results_file = directory / RESULTS_FILE
     if not run_file.is_file() or not results_file.is_file():
         raise StoreError(f"{directory} is not a complete run (need {RUN_FILE} and {RESULTS_FILE})")
-    meta_raw = json.loads(run_file.read_text(encoding="utf-8"))
+    meta_raw = _load_json(run_file.read_text(encoding="utf-8"), str(run_file))
+    if not isinstance(meta_raw, dict):
+        raise StoreError(f"{run_file}: expected a JSON object, got {type(meta_raw).__name__}")
     version = meta_raw.pop("schema_version", None)
     if version != SCHEMA_VERSION:
         raise StoreError(f"{run_file}: unsupported schema_version {version!r}")
@@ -135,7 +178,8 @@ def read_run(directory: Path) -> Run:
     with open(results_file, encoding="utf-8") as fh:
         for n, line in enumerate(fh, 1):
             if line.strip():
-                results.append(_from_dict(QuestionResult, json.loads(line), f"{results_file}:{n}"))
+                where = f"{results_file}:{n}"
+                results.append(_from_dict(QuestionResult, _load_json(line, where), where))
     return Run(meta, results)
 
 

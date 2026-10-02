@@ -85,6 +85,14 @@ def summarize(run: Run) -> Summary:
     )
 
 
+def escape_cell(text: str) -> str:
+    """Make arbitrary text safe inside one Markdown table cell: no pipes or line
+    breaks to split the row, and no ``<`` so it cannot open an HTML comment
+    such as the results markers."""
+    text = " ".join(str(text).split())
+    return text.replace("\\", "\\\\").replace("|", "\\|").replace("<", "&lt;")
+
+
 def _pct(correct: int, n: int) -> str:
     return f"{100.0 * correct / n:.1f}" if n else "-"
 
@@ -114,7 +122,7 @@ def render_markdown(runs: Sequence[Run]) -> str:
         "| " + " | ".join(COLUMNS) + " |",
         "|" + "|".join("---" if i < 3 else "---:" for i in range(len(COLUMNS))) + "|",
     ]
-    lines += ["| " + " | ".join(_row(s)) + " |" for s in summaries]
+    lines += ["| " + " | ".join(escape_cell(c) for c in _row(s)) + " |" for s in summaries]
     return "\n".join(lines)
 
 

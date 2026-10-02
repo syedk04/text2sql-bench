@@ -108,3 +108,22 @@ def test_cli_update_readme(tmp_path, capsys):
     assert cli.main([*args, "--check"]) == 0
     readme.write_text(f"x\n{START_MARKER}\nstale\n{END_MARKER}\n", encoding="utf-8")
     assert cli.main([*args, "--check"]) == 1
+
+
+def test_cells_cannot_break_the_table_or_inject_markers(tmp_path):
+    from text2sql.results.report import escape_cell
+
+    nasty = "model|with|pipes\nnew line <!-- results:end -->"
+    run = _run(model=nasty)
+    table = render_markdown([run])
+    lines = table.splitlines()
+    assert len(lines) == 3
+    assert lines[2].count(" | ") == 11  # still exactly 12 cells
+    assert END_MARKER not in table and START_MARKER not in table
+    assert escape_cell("a|b") == "a\|b"
+    assert escape_cell("x\r\ny") == "x y"
+
+    readme = tmp_path / "README.md"
+    readme.write_text(f"{START_MARKER}\n{END_MARKER}\n", encoding="utf-8")
+    update_readme(readme, [run])
+    assert update_readme(readme, [run]) is False  # markers still unique, idempotent
