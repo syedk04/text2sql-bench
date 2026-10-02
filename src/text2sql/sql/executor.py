@@ -125,6 +125,8 @@ def execute(
             check_select_only(sql)
         except UnsafeSQL as exc:
             return done("rejected", error=str(exc))
+        except Exception as exc:  # belt and braces: execute() never raises
+            return done("rejected", error=f"could not check SQL ({type(exc).__name__}: {exc})")
     if time.monotonic() >= deadline:
         return done("timeout", error="time budget used up before the query started")
 

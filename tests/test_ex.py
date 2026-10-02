@@ -92,3 +92,14 @@ def test_score_sql_against_explicit_path(synthetic_data_dir):
 def test_wrong_database_is_an_error(synthetic_data_dir):
     r = score_one(_q("SELECT COUNT(*) FROM item", db_id="zoo"), "SELECT COUNT(*) FROM item")
     assert r.correct == 0 and r.pred_status == "error"
+
+
+def test_deeply_nested_prediction_scores_zero_without_crashing(synthetic_data_dir):
+    from text2sql.eval.ex import score_many
+
+    qs = [_q("SELECT 1"), Question(2, "shop", "q?", "", "SELECT 1", "simple")]
+    deep = "SELECT " + "abs(" * 300 + "1" + ")" * 300
+    results = score_many(qs, [deep, "SELECT 1"])
+    assert [r.correct for r in results] == [0, 1]
+    assert results[0].pred_status == "rejected"
+    assert "nested too deeply" in results[0].error

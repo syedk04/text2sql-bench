@@ -50,7 +50,23 @@ _FORBIDDEN = _node_types(
 
 
 def check_select_only(sql: str) -> exp.Query:
-    """Return the parsed query, or raise :class:`UnsafeSQL` explaining why not."""
+    """Return the parsed query, or raise :class:`UnsafeSQL` explaining why not.
+
+    Never raises anything else: deeply nested input can make sqlglot hit
+    Python's recursion limit, and any other surprise from the parser is also
+    turned into a rejection, so one odd prediction cannot stop a batch run.
+    """
+    try:
+        return _check(sql)
+    except UnsafeSQL:
+        raise
+    except RecursionError as exc:
+        raise UnsafeSQL("query is nested too deeply to check") from exc
+    except Exception as exc:
+        raise UnsafeSQL(f"could not check SQL ({type(exc).__name__}: {exc})") from exc
+
+
+def _check(sql: str) -> exp.Query:
     if not isinstance(sql, str) or not sql.strip():
         raise UnsafeSQL("empty SQL")
     try:

@@ -89,3 +89,29 @@ def test_rejection_reasons_are_readable():
 def test_non_string_is_rejected():
     with pytest.raises(UnsafeSQL):
         check_select_only(None)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT " + "abs(" * 300 + "1" + ")" * 300,
+        "SELECT " + "(" * 500 + "1" + ")" * 500,
+        "SELECT " + "CASE WHEN 1 THEN " * 300 + "1" + " END" * 300,
+        "SELECT * FROM " + "(SELECT * FROM " * 300 + "t" + ")" * 300,
+    ],
+)
+def test_deep_nesting_is_rejected_not_crashed(sql):
+    with pytest.raises(UnsafeSQL):
+        check_select_only(sql)
+    assert not is_select_only(sql)
+
+
+def test_unexpected_parser_errors_become_rejections(monkeypatch):
+    import sqlglot
+
+    def boom(*a, **k):
+        raise KeyError("parser bug")
+
+    monkeypatch.setattr(sqlglot, "parse", boom)
+    with pytest.raises(UnsafeSQL, match="KeyError"):
+        check_select_only("SELECT 1")
