@@ -8,6 +8,8 @@ from pathlib import Path
 
 from text2sql import __version__, config
 
+DEFAULT_MANIFEST = config.PROJECT_ROOT / "manifests" / "dev50.json"
+
 
 def _cmd_download_questions(args: argparse.Namespace) -> int:
     from text2sql.data.bird import HF_REVISION, download_questions, load_questions
@@ -44,6 +46,26 @@ def _cmd_download_dbs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_build_manifest(args: argparse.Namespace) -> int:
+    from text2sql.data.bird import HF_FILE, HF_REPO, HF_REVISION, load_questions
+    from text2sql.data.manifest import build_manifest, write_manifest
+    from text2sql.net import sha256_file
+
+    qpath = Path(args.questions) if args.questions else config.questions_path()
+    questions = load_questions(qpath)
+    source = {
+        "hf_repo": HF_REPO,
+        "hf_revision": HF_REVISION,
+        "file": HF_FILE,
+        "sha256": sha256_file(qpath),
+    }
+    manifest = build_manifest(questions, seed=args.seed, source=source)
+    out = Path(args.out)
+    write_manifest(manifest, out)
+    print(f"wrote {manifest['n']} question ids to {out}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="text2sql", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -66,6 +88,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--zip", help="path to an already downloaded minidev.zip")
     p.set_defaults(handler=_cmd_download_dbs)
+
+    from text2sql.data.manifest import DEFAULT_SEED
+
+    p = sub.add_parser("build-manifest", help="draw the fixed 50-question dev slice")
+    p.add_argument("--questions", help="question file (default: data/bird/mini_dev_sqlite.json)")
+    p.add_argument("--out", default=str(DEFAULT_MANIFEST), help="output manifest path")
+    p.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    p.set_defaults(handler=_cmd_build_manifest)
 
     return parser
 
