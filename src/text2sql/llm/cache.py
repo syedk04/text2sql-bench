@@ -1,0 +1,112 @@
+"""Disk cache for model responses.
+
+The key is a hash of exactly the inputs that decide the answer (model, messages,
+temperature), so re-running an unchanged prompt after a code change costs no
+quota. Entries are written to a temp file and moved into place with
+``os.replace``, so a crash or a concurrent writer never leaves half a file.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import time
+import uuid
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+from text2sql import config
+from text2sql.llm.types import CompletionRequest, CompletionResponse
+
+KEY_VERSION = 1
+
+
+def cache_key(request: CompletionRequest) -> str:
+    payload = {
+        "v": KEY_VERSION,
+        "model": request.model,
+        "messages": [m.to_dict() for m in request.messages],
+        "temperature": request.temperature,
+    }
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def default_cache_dir() -> Path:
+    return config.cache_dir() / "llm"
+
+
+class DiskCache:
+    def __init__(self, root: Path | None = None) -> None:
+        self.root = root or default_cache_dir()
+
+    def path_for(self, key: str) -> Path:
+        if len(key) != 64 or any(c not in "0123456789abcdef" for c in key):
+            raise ValueError(f"not a cache key: {key!r}")
+        return self.root / key[:2] / f"{key}.json"
+
+    def get(self, key: str) -> CompletionResponse | None:
+        path = self.path_for(key)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, json.JSONDecodeError):
+            # Unreadable entry: treat as a miss; the next successful call rewrites it.
+            return None
+        if data.get("key") != key:
+            return None
+        resp = data.get("response") or {}
+        try:
+            return CompletionResponse(
+                text=resp["text"],
+                prompt_tokens=int(resp.get("prompt_tokens", 0)),
+                completion_tokens=int(resp.get("completion_tokens", 0)),
+                raw=resp.get("raw"),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def put(self, key: str, request: CompletionRequest, response: CompletionResponse) -> Path:
+        path = self.path_for(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        entry: dict[str, Any] = {
+            "key": key,
+            "key_version": KEY_VERSION,
+            "created_at": time.time(),
+            "request": {
+                "model": request.model,
+                "temperature": request.temperature,
+                "max_tokens": request.max_tokens,
+                "messages": [m.to_dict() for m in request.messages],
+            },
+            "response": asdict(response),
+        }
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        tmp.write_text(json.dumps(entry, ensure_ascii=False, indent=1), encoding="utf-8")
+        self._replace(tmp, path)
+        return path
+
+    @staticmethod
+    def _replace(tmp: Path, path: Path, attempts: int = 5) -> None:
+        # On Windows os.replace fails with PermissionError while another process
+        # has the destination open. The content for a key is interchangeable, so
+        # if someone else's copy is already in place we can simply drop ours.
+        for attempt in range(attempts):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if path.exists() and attempt == attempts - 1:
+                    tmp.unlink(missing_ok=True)
+                    return
+                time.sleep(0.05 * (attempt + 1))
+        tmp.unlink(missing_ok=True)
+        raise PermissionError(f"could not write cache entry {path}")
+
+    def __len__(self) -> int:
+        if not self.root.is_dir():
+            return 0
+        return sum(1 for _ in self.root.glob("??/*.json"))

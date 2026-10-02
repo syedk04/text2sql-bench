@@ -1,0 +1,113 @@
+import json
+import os
+import threading
+
+import pytest
+
+from text2sql import config
+from text2sql.llm.cache import DiskCache, cache_key, default_cache_dir
+from text2sql.llm.types import CompletionRequest, CompletionResponse, Message
+
+
+def _req(text="hi", model="m", temperature=0.0, max_tokens=None):
+    return CompletionRequest(
+        model, [Message("system", "s"), Message("user", text)], temperature, max_tokens
+    )
+
+
+def test_key_depends_on_model_messages_temperature_only():
+    base = cache_key(_req())
+    assert len(base) == 64
+    assert cache_key(_req()) == base
+    assert cache_key(_req(text="hello")) != base
+    assert cache_key(_req(model="m2")) != base
+    assert cache_key(_req(temperature=0.7)) != base
+    assert cache_key(_req(max_tokens=50)) == base  # does not change the answer's identity
+
+
+def test_key_is_stable_across_releases():
+    # Changing the key format would silently invalidate every cached response.
+    req = CompletionRequest("m", [Message("user", "café")], 0.0)
+    assert cache_key(req) == cache_key(CompletionRequest("m", [Message("user", "café")], 0))
+    assert cache_key(req) == "cd94c8162d63a3097266dc389178c38e38dba27098f6e3a996a3130383542d63"
+
+
+def test_round_trip_and_layout(tmp_path):
+    cache = DiskCache(tmp_path / "cache dir")
+    req = _req("ünïcode")
+    key = cache_key(req)
+    assert cache.get(key) is None
+    resp = CompletionResponse("SELECT 1", 10, 2, raw={"id": "x"})
+    path = cache.put(key, req, resp)
+    assert path == tmp_path / "cache dir" / key[:2] / f"{key}.json"
+    assert cache.get(key) == resp
+    assert cache.get(key).raw == {"id": "x"}
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert stored["request"]["messages"][1]["content"] == "ünïcode"
+    assert len(cache) == 1
+    assert not list(path.parent.glob("*.tmp"))
+
+
+def test_corrupt_or_foreign_entries_are_misses(tmp_path):
+    cache = DiskCache(tmp_path)
+    req = _req()
+    key = cache_key(req)
+    path = cache.put(key, req, CompletionResponse("x"))
+    path.write_text("{not json", encoding="utf-8")
+    assert cache.get(key) is None
+    path.write_text(json.dumps({"key": "other", "response": {"text": "x"}}), encoding="utf-8")
+    assert cache.get(key) is None
+    path.write_text(json.dumps({"key": key, "response": {}}), encoding="utf-8")
+    assert cache.get(key) is None
+
+
+@pytest.mark.parametrize("bad", ["", "../x", "A" * 64, "g" * 64, "a" * 63])
+def test_bad_keys_are_refused(tmp_path, bad):
+    with pytest.raises(ValueError):
+        DiskCache(tmp_path).path_for(bad)
+
+
+def test_concurrent_writers_leave_one_valid_entry(tmp_path):
+    cache = DiskCache(tmp_path)
+    req = _req()
+    key = cache_key(req)
+    errors = []
+
+    def write(i):
+        try:
+            for _ in range(20):
+                cache.put(key, req, CompletionResponse(f"SELECT {i}", 1, 1))
+                cache.get(key)  # readers racing writers must not crash
+        except Exception as exc:  # pragma: no cover - reported below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=write, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    got = cache.get(key)
+    assert got is not None and got.text.startswith("SELECT ")
+    assert not list(tmp_path.rglob("*.tmp"))
+
+
+def test_replace_gives_up_quietly_if_entry_exists(tmp_path, monkeypatch):
+    cache = DiskCache(tmp_path)
+    req = _req()
+    key = cache_key(req)
+    cache.put(key, req, CompletionResponse("first"))
+
+    def locked(src, dst):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(os, "replace", locked)
+    cache.put(key, req, CompletionResponse("second"))
+    monkeypatch.undo()
+    assert cache.get(key).text == "first"
+    assert not list(tmp_path.rglob("*.tmp"))
+
+
+def test_default_dir_follows_data_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv(config.DATA_DIR_ENV, str(tmp_path))
+    assert default_cache_dir() == tmp_path.resolve() / "cache" / "llm"
