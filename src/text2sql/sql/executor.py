@@ -8,12 +8,25 @@ not matter:
 2. ``PRAGMA query_only = ON`` rejects any statement that would write;
 3. an authorizer callback allows only reads, function calls and recursive CTEs,
    and is installed after the pragma so nothing can switch the pragma back off.
+
+On top of that, :func:`execute` runs the sqlglot SELECT-only check first, stops
+queries that run past a deadline (a SQLite progress handler, which works on
+Windows too, unlike signal-based timeouts) and can cap the number of rows fetched.
 """
 
 from __future__ import annotations
 
 import sqlite3
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Literal
+
+from text2sql.sql.guard import UnsafeSQL, check_select_only
+
+Status = Literal["ok", "error", "timeout", "rejected"]
+# How many SQLite VM instructions run between deadline checks.
+PROGRESS_STEPS = 10_000
 
 # Authorizer actions that a pure query needs. Everything else (writes, DDL,
 # PRAGMA, ATTACH, transactions, ANALYZE, ...) is denied.
@@ -66,3 +79,84 @@ def open_readonly(db_path: str | Path) -> sqlite3.Connection:
         conn.close()
         raise
     return conn
+
+
+@dataclass
+class ExecResult:
+    status: Status
+    rows: list[tuple[Any, ...]] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list)
+    truncated: bool = False
+    error: str | None = None
+    elapsed_s: float = 0.0
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+
+def execute(
+    db_path: str | Path,
+    sql: str,
+    *,
+    timeout_s: float = 30.0,
+    row_limit: int | None = None,
+    guard: bool = True,
+    deadline: float | None = None,
+) -> ExecResult:
+    """Run one query read-only and report what happened instead of raising.
+
+    ``timeout_s`` covers execution and fetching. ``deadline`` (a
+    ``time.monotonic()`` value) overrides it, which lets a caller share one time
+    budget across several queries. ``row_limit=None`` fetches everything; with a
+    limit, one extra row is requested to tell whether the result was cut off.
+    """
+    start = time.monotonic()
+    if deadline is None:
+        deadline = start + timeout_s
+    if row_limit is not None and row_limit < 0:
+        raise ValueError("row_limit must be >= 0 or None")
+
+    def done(status: Status, **kw: Any) -> ExecResult:
+        return ExecResult(status=status, elapsed_s=time.monotonic() - start, **kw)
+
+    if guard:
+        try:
+            check_select_only(sql)
+        except UnsafeSQL as exc:
+            return done("rejected", error=str(exc))
+    if time.monotonic() >= deadline:
+        return done("timeout", error="time budget used up before the query started")
+
+    try:
+        conn = open_readonly(db_path)
+    except (ReadOnlyError, sqlite3.Error) as exc:
+        return done("error", error=f"could not open database: {exc}")
+
+    timed_out = False
+
+    def check_deadline() -> int:
+        nonlocal timed_out
+        if time.monotonic() > deadline:
+            timed_out = True
+            return 1  # non-zero aborts the running statement
+        return 0
+
+    conn.set_progress_handler(check_deadline, PROGRESS_STEPS)
+    try:
+        cursor = conn.execute(sql)
+        columns = [d[0] for d in cursor.description or []]
+        if row_limit is None:
+            rows = cursor.fetchall()
+            truncated = False
+        else:
+            rows = cursor.fetchmany(row_limit + 1)
+            truncated = len(rows) > row_limit
+            rows = rows[:row_limit]
+        return done("ok", rows=rows, columns=columns, truncated=truncated)
+    except Exception as exc:  # sqlite3 errors, decode errors, overflow, ...
+        if timed_out:
+            return done("timeout", error=f"query exceeded {deadline - start:.1f}s")
+        return done("error", error=f"{type(exc).__name__}: {exc}")
+    finally:
+        conn.close()
