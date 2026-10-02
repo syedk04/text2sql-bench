@@ -52,14 +52,20 @@ writes on its own:
 1. a sqlglot parse that accepts exactly one statement, which must be a query
    (SELECT, WITH, UNION, INTERSECT, EXCEPT), with no write, DDL, PRAGMA, ATTACH
    or transaction node anywhere inside it;
-2. the database file opened through a `mode=ro` SQLite URI;
+2. the database file opened through a `mode=ro&immutable=1` SQLite URI, which
+   also means no lock or `-wal`/`-shm` files appear next to it (the benchmark
+   databases never change, so treating them as immutable is safe);
 3. `PRAGMA query_only = ON`;
 4. a SQLite authorizer that only allows reads, function calls and recursive
    CTEs (and refuses `load_extension`).
 
 Queries stop at a deadline through a SQLite progress handler, which also works
-on Windows and covers the time spent fetching rows. An optional row cap reports
-whether the result was cut off. The tests try inserts, updates, deletes, drops,
+on Windows and covers the time spent fetching rows. A query that still finishes
+after its deadline (one very expensive step can run between checks) is reported
+as a timeout, matching the official wall-clock limit. Strings and blobs a query
+builds are capped at 100 MB. An optional row cap reports whether the result was
+cut off. SQL nested too deeply for the parser is rejected rather than allowed
+to crash a batch. The tests try inserts, updates, deletes, drops,
 ATTACH, VACUUM, PRAGMA changes and DML hidden in a CTE, in a folder whose path
 contains spaces, and check the database file is byte for byte unchanged.
 
