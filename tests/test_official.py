@@ -170,3 +170,16 @@ def test_gate_a_official_agreement(baseline, tmp_path):
     ours = score_many(questions, [p.sql for p in preds])
     agreement = compare_vectors(baseline, official, [r.correct for r in ours])
     assert agreement.disagreements == []
+
+
+def test_missing_func_timeout_is_explained(tmp_path, monkeypatch):
+    import importlib.util
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *a: None if name == "func_timeout" else real(name, *a),
+    )
+    with pytest.raises(OfficialError, match="uv sync --group official"):
+        load_official(tmp_path, fetch=True)

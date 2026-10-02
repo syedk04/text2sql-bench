@@ -170,15 +170,15 @@ def load_official(
     """
     root = root or official_dir()
     if fetch:
+        # The real evaluation_ex.py imports func_timeout at the top; say how to
+        # get it rather than failing inside their import.
+        if importlib.util.find_spec("func_timeout") is None:
+            raise OfficialError(
+                "the official scorer needs func-timeout: run `uv sync --group official`"
+            )
         fetch_official_scripts(root)
     else:
         write_stub_modules(root)
-    try:
-        import func_timeout  # noqa: F401
-    except ImportError as exc:  # pragma: no cover - depends on the environment
-        raise OfficialError(
-            "the official scorer needs func-timeout: run `uv sync --group official`"
-        ) from exc
     # Worker processes are spawned (Windows) and inherit sys.path, so they can
     # import the scripts and stubs by name too.
     for p in (str(root / "stubs"), str(root)):
