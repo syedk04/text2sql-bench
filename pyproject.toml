@@ -1,0 +1,44 @@
+[project]
+name = "text2sql-bench"
+version = "0.1.0"
+description = "Text-to-SQL on BIRD Mini-Dev with a safe executor and an evaluator that matches the official script"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "sqlglot>=25.0",
+    "truststore>=0.9",
+]
+
+[project.scripts]
+text2sql = "text2sql.cli:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "pytest>=8.0",
+    "mypy>=1.11",
+]
+official = [
+    "func-timeout>=4.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/text2sql"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "bird: needs the real BIRD Mini-Dev data under data/ (skipped when missing)",
+]
