@@ -67,3 +67,11 @@ def test_by_id_and_unicode(tmp_path):
     path.write_text(json.dumps([_record(question="Où est Zürich?")]), encoding="utf-8")
     qs = load_questions(path)
     assert by_id(qs)[1].question == "Où est Zürich?"
+
+
+def test_duplicates_allowed_only_on_request():
+    raw = [_record(), _record(question="same id again")]
+    with pytest.raises(DatasetError, match="duplicate"):
+        parse_questions(raw)
+    qs = parse_questions(raw, allow_duplicate_ids=True)
+    assert [q.question for q in qs] == ["q?", "same id again"]

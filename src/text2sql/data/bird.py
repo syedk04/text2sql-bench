@@ -71,13 +71,18 @@ def _parse_record(index: int, record: Any) -> Question:
     )
 
 
-def parse_questions(raw: Any, expect_total: int | None = None) -> list[Question]:
+def parse_questions(
+    raw: Any, expect_total: int | None = None, *, allow_duplicate_ids: bool = False
+) -> list[Question]:
+    """Validate raw records. ``allow_duplicate_ids`` exists only for the legacy
+    zip file, which repeats two records (ids 137 and 138); scoring there is by
+    position, so the repeats are kept as they are."""
     if not isinstance(raw, list):
         raise DatasetError(f"expected a JSON array, got {type(raw).__name__}")
     questions = [_parse_record(i, rec) for i, rec in enumerate(raw)]
     seen: set[int] = set()
     for q in questions:
-        if q.question_id in seen:
+        if q.question_id in seen and not allow_duplicate_ids:
             raise DatasetError(f"duplicate question_id {q.question_id}")
         seen.add(q.question_id)
     if expect_total is not None and len(questions) != expect_total:
@@ -85,11 +90,13 @@ def parse_questions(raw: Any, expect_total: int | None = None) -> list[Question]
     return questions
 
 
-def load_questions(path: str | Path, expect_total: int | None = None) -> list[Question]:
+def load_questions(
+    path: str | Path, expect_total: int | None = None, *, allow_duplicate_ids: bool = False
+) -> list[Question]:
     """Load and validate a question file, keeping file order."""
     with open(path, encoding="utf-8") as fh:
         raw = json.load(fh)
-    return parse_questions(raw, expect_total=expect_total)
+    return parse_questions(raw, expect_total=expect_total, allow_duplicate_ids=allow_duplicate_ids)
 
 
 def by_id(questions: list[Question]) -> dict[int, Question]:

@@ -164,7 +164,9 @@ def _cmd_gate_official(args: argparse.Namespace) -> int:
     workdir = official_dir() / "runs" / f"{baseline.name}-{label}"
     if args.legacy:
         legacy = config.bird_dir() / "legacy"
-        questions = load_questions(legacy / "mini_dev_sqlite.json", expect_total=500)
+        questions = load_questions(
+            legacy / "mini_dev_sqlite.json", expect_total=500, allow_duplicate_ids=True
+        )
         gold_path = legacy / "mini_dev_sqlite_gold.sql"
         gold_source = "zip legacy files"
     else:
