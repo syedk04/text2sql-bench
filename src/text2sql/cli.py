@@ -85,7 +85,8 @@ def _cmd_eval_preds(args: argparse.Namespace) -> int:
         return 1
     malformed = [i for i, p in enumerate(preds) if not p.well_formed]
     db_mismatch = [
-        i for i, (p, q) in enumerate(zip(preds, questions, strict=True))
+        i
+        for i, (p, q) in enumerate(zip(preds, questions, strict=True))
         if p.well_formed and p.db_id != q.db_id
     ]
 
@@ -185,13 +186,17 @@ def _cmd_gate_official(args: argparse.Namespace) -> int:
     ours_results = score_many(questions, [p.sql for p in preds], timeout_s=args.timeout)
     agreement = compare_vectors(baseline.name, official, [r.correct for r in ours_results])
 
-    print(f"official EX {agreement.official_ex:.2f}  ours EX {agreement.ours_ex:.2f}  "
-          f"published {baseline.published_ex:.2f}")
+    print(
+        f"official EX {agreement.official_ex:.2f}  ours EX {agreement.ours_ex:.2f}  "
+        f"published {baseline.published_ex:.2f}"
+    )
     print(f"agreement: {agreement.n - len(agreement.disagreements)}/{agreement.n}")
     for i in agreement.disagreements:
         r = ours_results[i]
-        print(f"  position {i} question {r.question_id}: official={official[i]} "
-              f"ours={r.correct} ({r.pred_status}/{r.gold_status}) {r.error or ''}")
+        print(
+            f"  position {i} question {r.question_id}: official={official[i]} "
+            f"ours={r.correct} ({r.pred_status}/{r.gold_status}) {r.error or ''}"
+        )
     workdir.mkdir(parents=True, exist_ok=True)
     report_path = workdir / "agreement.json"
     report_path.write_text(

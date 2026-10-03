@@ -83,11 +83,7 @@ class LLMClient:
         A provider-supplied ``retry_after`` is used when it is a sane number,
         capped at ``max_retry_after_s``; otherwise full-jitter backoff applies.
         """
-        if (
-            isinstance(retry_after, int | float)
-            and math.isfinite(retry_after)
-            and retry_after >= 0
-        ):
+        if isinstance(retry_after, int | float) and math.isfinite(retry_after) and retry_after >= 0:
             return min(float(retry_after), self.max_retry_after_s)
         return self._rng.uniform(0.0, min(MAX_BACKOFF_S, BASE_BACKOFF_S * 2**attempt))
 

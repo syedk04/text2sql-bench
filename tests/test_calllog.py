@@ -31,8 +31,19 @@ def test_log_writes_one_json_line_per_call(tmp_path):
     first = json.loads(lines[0])
     assert first == {**FIELDS, "ts": "2026-10-02T12:00:00.000+00:00", "error": None}
     assert set(first) == {
-        "ts", "run_id", "question_id", "provider", "model", "key", "cache_hit",
-        "attempts", "status", "prompt_tokens", "completion_tokens", "latency_s", "error",
+        "ts",
+        "run_id",
+        "question_id",
+        "provider",
+        "model",
+        "key",
+        "cache_hit",
+        "attempts",
+        "status",
+        "prompt_tokens",
+        "completion_tokens",
+        "latency_s",
+        "error",
     }
     records = read_log(path)
     assert [r.cache_hit for r in records] == [False, True]

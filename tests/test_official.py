@@ -25,7 +25,7 @@ from text2sql.eval.official import (
     write_gold_inputs,
 )
 
-FAKE_UTILS = '''
+FAKE_UTILS = """
 import json
 import sqlite3
 import psycopg2  # the real module imports these at top level too
@@ -48,9 +48,9 @@ def package_sqls(sql_path, db_root_path, mode="pred"):
 
 def sort_results(rows):
     return sorted(rows, key=lambda x: x["sql_idx"])
-'''
+"""
 
-FAKE_EX = '''
+FAKE_EX = """
 from evaluation_utils import package_sqls, sort_results
 import sqlite3
 
@@ -71,7 +71,7 @@ def run_sqls_parallel(sqls, db_places, num_cpus=1, meta_time_out=30.0, sql_diale
             res = 0
         conn.close()
         result_callback({"sql_idx": i, "res": res})
-'''
+"""
 
 
 @pytest.fixture

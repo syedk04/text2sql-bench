@@ -30,9 +30,7 @@ REDACTED = "[REDACTED]"
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # query parameters such as ?key=... or &api_key=...
     (
-        re.compile(
-            r"(?i)([?&](?:key|api[_-]?key|access[_-]?token|token|secret)=)[^&\s\"'<>]+"
-        ),
+        re.compile(r"(?i)([?&](?:key|api[_-]?key|access[_-]?token|token|secret)=)[^&\s\"'<>]+"),
         r"\1" + REDACTED,
     ),
     # Authorization: Bearer <token>

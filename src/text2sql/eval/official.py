@@ -136,9 +136,10 @@ def write_gold_inputs(questions: Sequence[Question], workdir: Path) -> tuple[Pat
     workdir.mkdir(parents=True, exist_ok=True)
     gold = workdir / "gold.sql"
     diff = workdir / "diff.jsonl"
-    with open(gold, "w", encoding="utf-8", newline="\n") as g, open(
-        diff, "w", encoding="utf-8", newline="\n"
-    ) as d:
+    with (
+        open(gold, "w", encoding="utf-8", newline="\n") as g,
+        open(diff, "w", encoding="utf-8", newline="\n") as d,
+    ):
         for q in questions:
             if any(c in q.gold_sql for c in "\t\r\n"):
                 raise OfficialError(
@@ -160,9 +161,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
     return module
 
 
-def load_official(
-    root: Path | None = None, *, fetch: bool = True
-) -> tuple[ModuleType, ModuleType]:
+def load_official(root: Path | None = None, *, fetch: bool = True) -> tuple[ModuleType, ModuleType]:
     """Import the pinned official scripts as modules (fetching them if needed).
 
     ``fetch=False`` loads whatever scripts are already in ``root`` without the
@@ -214,9 +213,7 @@ def run_official(
         remove_wal_leftovers(sorted({Path(p) for p in db_paths}))
     results = utils.sort_results(ex.exec_result)
     if [r["sql_idx"] for r in results] != list(range(len(pairs))):
-        raise OfficialError(
-            f"official run returned {len(results)} results for {len(pairs)} pairs"
-        )
+        raise OfficialError(f"official run returned {len(results)} results for {len(pairs)} pairs")
     return [int(r["res"]) for r in results]
 
 

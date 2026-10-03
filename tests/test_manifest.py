@@ -21,9 +21,7 @@ def _questions(n_db: int = 11, per_bucket: int = 6) -> list[Question]:
     for d in range(n_db):
         for difficulty in ("simple", "moderate", "challenging"):
             for _ in range(per_bucket):
-                qs.append(
-                    Question(qid, f"db_{d:02d}", f"q{qid}", "", "SELECT 1", difficulty)
-                )
+                qs.append(Question(qid, f"db_{d:02d}", f"q{qid}", "", "SELECT 1", difficulty))
                 qid += 1
     return qs
 

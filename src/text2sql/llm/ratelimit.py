@@ -23,11 +23,7 @@ from text2sql.llm.types import BudgetExceeded
 
 
 def _finite_number(value: object) -> bool:
-    return (
-        isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-    )
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
 
 
 class TokenBucket:

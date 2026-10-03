@@ -45,9 +45,7 @@ def select_ids(
         buckets: list[list[int]] = []
         for db_id in db_ids:
             bucket = sorted(
-                q.question_id
-                for q in questions
-                if q.db_id == db_id and q.difficulty == difficulty
+                q.question_id for q in questions if q.db_id == db_id and q.difficulty == difficulty
             )
             rng.shuffle(bucket)
             buckets.append(bucket)

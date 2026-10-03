@@ -23,9 +23,7 @@ LEGACY_FILES = ("mini_dev_sqlite.json", "mini_dev_sqlite_gold.sql")
 # Matched against the member path after the top-level folder(s), so the layout
 # can shift (minidev/MINIDEV/... today) without breaking extraction.
 _SQLITE_RE = re.compile(r"(?:^|/)dev_databases/([A-Za-z0-9_]+)/([A-Za-z0-9_]+)\.sqlite$")
-_DESC_RE = re.compile(
-    r"(?:^|/)dev_databases/([A-Za-z0-9_]+)/database_description/([^/]+\.csv)$"
-)
+_DESC_RE = re.compile(r"(?:^|/)dev_databases/([A-Za-z0-9_]+)/database_description/([^/]+\.csv)$")
 
 
 @dataclass
@@ -100,9 +98,7 @@ def download_zip(dest: Path) -> Path:
 def list_databases(db_root: Path) -> list[str]:
     if not db_root.is_dir():
         return []
-    return sorted(
-        p.name for p in db_root.iterdir() if (p / f"{p.name}.sqlite").is_file()
-    )
+    return sorted(p.name for p in db_root.iterdir() if (p / f"{p.name}.sqlite").is_file())
 
 
 def table_names(db_file: Path) -> list[str]:
