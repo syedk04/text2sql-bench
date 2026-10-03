@@ -53,6 +53,10 @@ class CallLogger:
     def log(self, **fields: object) -> CallRecord:
         if fields.get("status") not in STATUSES:
             raise ValueError(f"status must be one of {STATUSES}, got {fields.get('status')!r}")
+        from text2sql.llm.requestlog import scrub_secrets
+
+        if isinstance(fields.get("error"), str):
+            fields["error"] = scrub_secrets(fields["error"])  # type: ignore[arg-type]
         record = CallRecord(ts=self._now(), **fields)  # type: ignore[arg-type]
         line = json.dumps(asdict(record), ensure_ascii=False) + "\n"
         with self._lock:

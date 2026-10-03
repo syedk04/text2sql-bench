@@ -21,11 +21,13 @@ import math
 import random
 import time
 from collections.abc import Callable
+from typing import Any
 
 from text2sql.llm.base import Provider
 from text2sql.llm.cache import DiskCache, cache_key
 from text2sql.llm.calllog import CallLogger
 from text2sql.llm.ratelimit import DailyTokenBudget, TokenBucket
+from text2sql.llm.requestlog import RequestLogger
 from text2sql.llm.types import (
     BudgetExceeded,
     CompletionRequest,
@@ -52,6 +54,7 @@ class LLMClient:
         bucket: TokenBucket | None = None,
         budget: DailyTokenBudget | None = None,
         logger: CallLogger | None = None,
+        request_logger: RequestLogger | None = None,
         max_attempts: int = 6,
         max_retry_after_s: float = 300.0,
         clock: Callable[[], float] = time.monotonic,
@@ -65,6 +68,7 @@ class LLMClient:
         self.bucket = bucket
         self.budget = budget
         self.logger = logger
+        self.request_logger = request_logger
         self.max_attempts = max_attempts
         if not math.isfinite(max_retry_after_s) or max_retry_after_s < 0:
             raise ValueError("max_retry_after_s must be a finite number >= 0")
@@ -143,15 +147,38 @@ class LLMClient:
                     )
                     raise
             attempts += 1
+            attempt_start = self._clock()
+
+            def record(
+                outcome: str, _attempt: int = attempts, _start: float = attempt_start, **kw: Any
+            ) -> None:
+                if self.request_logger is not None:
+                    self.request_logger.log(
+                        key=key,
+                        run_id=run_id,
+                        question_id=question_id,
+                        provider=self.provider.name,
+                        attempt=_attempt,
+                        request=request,
+                        outcome=outcome,
+                        latency_s=self._clock() - _start,
+                        **kw,
+                    )
+
             try:
                 response = self.provider.complete(request)
             except (RateLimitError, TransientError) as exc:
+                record(
+                    "rate_limited" if isinstance(exc, RateLimitError) else "transient",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
                 last_error = exc
                 if attempts >= self.max_attempts:
                     break
                 self._sleep(self.backoff(attempts - 1, exc.retry_after))
                 continue
             except Exception as exc:
+                record("error", error=f"{type(exc).__name__}: {exc}")
                 self._log(
                     **base,
                     cache_hit=False,
@@ -164,6 +191,12 @@ class LLMClient:
                 )
                 raise
 
+            if not response.text.strip():
+                record("empty", response=response)
+            elif response.truncated:
+                record("truncated", response=response)
+            else:
+                record("ok", response=response)
             # An empty answer is more likely a provider hiccup than a real
             # reply, and a truncated one is incomplete; both are returned but
             # not cached.
