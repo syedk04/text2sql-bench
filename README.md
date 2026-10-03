@@ -187,7 +187,7 @@ uv run pytest -q
 CI runs on Ubuntu and Windows with small synthetic databases only. Tests that
 need the real data are marked `bird` and skip when `data/bird` is missing; the
 full gates are also marked `slow` and only run with `--run-slow`. With SQLite
-3.43.1, `uv run pytest --run-slow` passes all 285 tests in about 9 minutes; on
+3.43.1, `uv run pytest --run-slow` passes every test, the slow gates taking about 9 minutes; on
 SQLite 3.44 or newer the gold vs gold test fails on questions 518 and 701 for
 the reason given above.
 
