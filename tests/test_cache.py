@@ -8,6 +8,12 @@ from text2sql import config
 from text2sql.llm.cache import DiskCache, cache_key, default_cache_dir
 from text2sql.llm.types import CompletionRequest, CompletionResponse, Message
 
+KEY_V2 = "47bcaba7be9f498863cff237fdab216cf1d02ce9a15595c3f5f8c5917a8a15f3"
+
+
+def _key(req: CompletionRequest, provider: str = "fake") -> str:
+    return cache_key(req, provider=provider)
+
 
 def _req(text="hi", model="m", temperature=0.0, max_tokens=None):
     return CompletionRequest(
@@ -15,27 +21,31 @@ def _req(text="hi", model="m", temperature=0.0, max_tokens=None):
     )
 
 
-def test_key_depends_on_model_messages_temperature_only():
-    base = cache_key(_req())
+def test_key_covers_everything_that_decides_the_answer():
+    base = _key(_req())
     assert len(base) == 64
-    assert cache_key(_req()) == base
-    assert cache_key(_req(text="hello")) != base
-    assert cache_key(_req(model="m2")) != base
-    assert cache_key(_req(temperature=0.7)) != base
-    assert cache_key(_req(max_tokens=50)) == base  # does not change the answer's identity
+    assert _key(_req()) == base
+    assert _key(_req(text="hello")) != base
+    assert _key(_req(model="m2")) != base
+    assert _key(_req(temperature=0.7)) != base
+    assert _key(_req(max_tokens=50)) != base
+    assert _key(_req(), provider="other") != base
+    with pytest.raises(ValueError):
+        cache_key(_req(), provider="")
 
 
 def test_key_is_stable_across_releases():
-    # Changing the key format would silently invalidate every cached response.
+    # Changing the key format would silently invalidate every cached response,
+    # so this pins version 2 of the format.
     req = CompletionRequest("m", [Message("user", "café")], 0.0)
-    assert cache_key(req) == cache_key(CompletionRequest("m", [Message("user", "café")], 0))
-    assert cache_key(req) == "cd94c8162d63a3097266dc389178c38e38dba27098f6e3a996a3130383542d63"
+    assert _key(req) == _key(CompletionRequest("m", [Message("user", "café")], 0))
+    assert _key(req) == KEY_V2
 
 
 def test_round_trip_and_layout(tmp_path):
     cache = DiskCache(tmp_path / "cache dir")
     req = _req("ünïcode")
-    key = cache_key(req)
+    key = _key(req)
     assert cache.get(key) is None
     resp = CompletionResponse("SELECT 1", 10, 2, raw={"id": "x"})
     path = cache.put(key, req, resp)
@@ -51,7 +61,7 @@ def test_round_trip_and_layout(tmp_path):
 def test_corrupt_or_foreign_entries_are_misses(tmp_path):
     cache = DiskCache(tmp_path)
     req = _req()
-    key = cache_key(req)
+    key = _key(req)
     path = cache.put(key, req, CompletionResponse("x"))
     path.write_text("{not json", encoding="utf-8")
     assert cache.get(key) is None
@@ -70,7 +80,7 @@ def test_bad_keys_are_refused(tmp_path, bad):
 def test_concurrent_writers_leave_one_valid_entry(tmp_path):
     cache = DiskCache(tmp_path)
     req = _req()
-    key = cache_key(req)
+    key = _key(req)
     errors = []
 
     def write(i):
@@ -95,7 +105,7 @@ def test_concurrent_writers_leave_one_valid_entry(tmp_path):
 def test_replace_gives_up_quietly_if_entry_exists(tmp_path, monkeypatch):
     cache = DiskCache(tmp_path)
     req = _req()
-    key = cache_key(req)
+    key = _key(req)
     cache.put(key, req, CompletionResponse("first"))
 
     def locked(src, dst):
@@ -126,7 +136,7 @@ def test_temp_file_name_is_short(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "replace", spy)
     cache = DiskCache(tmp_path)
     req = _req()
-    cache.put(cache_key(req), req, CompletionResponse("x"))
+    cache.put(_key(req), req, CompletionResponse("x"))
     src, dst = seen[0]
     assert len(src) <= len(dst)
     assert os.path.dirname(src) == os.path.dirname(dst)
@@ -159,7 +169,7 @@ def _entry(key, **response):
 def test_any_malformed_entry_is_a_miss(tmp_path, content):
     cache = DiskCache(tmp_path)
     req = _req()
-    key = cache_key(req)
+    key = _key(req)
     variants = {
         "KEY_RESP_LIST": json.dumps({"key": key, "response": [1]}).encode(),
         "KEY_TEXT_INT": _entry(key, text=123),
@@ -179,10 +189,21 @@ def test_any_malformed_entry_is_a_miss(tmp_path, content):
 
 def test_directory_in_place_of_entry_is_a_miss(tmp_path):
     cache = DiskCache(tmp_path)
-    key = cache_key(_req())
+    key = _key(_req())
     cache.path_for(key).mkdir(parents=True)
     assert cache.get(key) is None
 
 
 def test_negative_zero_temperature_shares_the_key():
-    assert cache_key(_req(temperature=-0.0)) == cache_key(_req(temperature=0.0))
+    assert _key(_req(temperature=-0.0)) == _key(_req(temperature=0.0))
+
+
+def test_finish_reason_round_trips_and_bad_values_are_misses(tmp_path):
+    cache = DiskCache(tmp_path)
+    req = _req()
+    key = _key(req)
+    cache.put(key, req, CompletionResponse("SELECT 1", 1, 1, finish_reason="stop"))
+    assert cache.get(key).finish_reason == "stop"
+    path = cache.path_for(key)
+    path.write_bytes(_entry(key, text="x", finish_reason=5))
+    assert cache.get(key) is None

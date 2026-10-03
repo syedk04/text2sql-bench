@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 ROLES = ("system", "user", "assistant")
+TRUNCATED_FINISH_REASONS = frozenset({"length", "max_tokens"})
 
 
 @dataclass(frozen=True)
@@ -57,10 +58,19 @@ class CompletionResponse:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     raw: dict[str, Any] | None = field(default=None, compare=False)
+    # Provider's stop reason, normalised to lower case where known: "stop",
+    # "length" / "max_tokens" (cut off by the token limit), ... None if unknown.
+    finish_reason: str | None = None
 
     @property
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
+
+    @property
+    def truncated(self) -> bool:
+        """Cut off by the token limit. Truncated answers are returned but never
+        cached, so a later call with more room can complete them."""
+        return (self.finish_reason or "").lower() in TRUNCATED_FINISH_REASONS
 
 
 class LLMError(RuntimeError):

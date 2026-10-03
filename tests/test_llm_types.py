@@ -84,3 +84,12 @@ def test_fake_token_counts():
     assert resp.completion_tokens == 2
     assert resp.prompt_tokens == rough_token_count("be brief\n1234")
     assert rough_token_count("") == 0
+
+
+def test_finish_reason_and_truncation():
+    assert CompletionResponse("x").finish_reason is None
+    assert not CompletionResponse("x").truncated
+    assert CompletionResponse("x", finish_reason="length").truncated
+    assert CompletionResponse("x", finish_reason="max_tokens").truncated
+    assert not CompletionResponse("x", finish_reason="stop").truncated
+    assert FakeProvider(["SELECT 1"]).complete(_req()).finish_reason == "stop"

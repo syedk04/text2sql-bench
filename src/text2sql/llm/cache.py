@@ -1,7 +1,7 @@
 """Disk cache for model responses.
 
-The key is a hash of exactly the inputs that decide the answer (model, messages,
-temperature), so re-running an unchanged prompt after a code change costs no
+The key is a hash of exactly the inputs that decide the answer (provider, model,
+messages, temperature, max_tokens), so re-running an unchanged prompt after a code change costs no
 quota. Entries are written to a temp file and moved into place with
 ``os.replace``, so a crash or a concurrent writer never leaves half a file.
 """
@@ -20,13 +20,20 @@ from typing import Any
 from text2sql import config
 from text2sql.llm.types import CompletionRequest, CompletionResponse
 
-KEY_VERSION = 1
+KEY_VERSION = 2
 
 
-def cache_key(request: CompletionRequest) -> str:
+def cache_key(request: CompletionRequest, *, provider: str) -> str:
+    """Fingerprint of everything that decides the answer. The same model name
+    can mean different weights on different providers, and max_tokens can cut
+    an answer short, so both are part of the key (version 2)."""
+    if not provider:
+        raise ValueError("provider name is required for the cache key")
     payload = {
         "v": KEY_VERSION,
+        "provider": provider,
         "model": request.model,
+        "max_tokens": request.max_tokens,
         "messages": [m.to_dict() for m in request.messages],
         # + 0.0 turns -0.0 into 0.0 so the two spellings share an entry
         "temperature": request.temperature + 0.0,
@@ -66,6 +73,9 @@ class DiskCache:
         prompt_tokens = resp.get("prompt_tokens", 0)
         completion_tokens = resp.get("completion_tokens", 0)
         raw = resp.get("raw")
+        finish_reason = resp.get("finish_reason")
+        if finish_reason is not None and not isinstance(finish_reason, str):
+            return None
         if not isinstance(text, str) or not text.strip():
             return None
         for n in (prompt_tokens, completion_tokens):
@@ -73,7 +83,7 @@ class DiskCache:
                 return None
         if raw is not None and not isinstance(raw, dict):
             return None
-        return CompletionResponse(text, prompt_tokens, completion_tokens, raw)
+        return CompletionResponse(text, prompt_tokens, completion_tokens, raw, finish_reason)
 
     def put(self, key: str, request: CompletionRequest, response: CompletionResponse) -> Path:
         path = self.path_for(key)

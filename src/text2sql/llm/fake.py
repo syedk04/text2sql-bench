@@ -22,7 +22,9 @@ class FakeProvider:
 
     Script steps may be a string (returned as the completion text), a full
     :class:`CompletionResponse`, or an exception instance (raised). When the
-    script runs out the last step repeats, unless ``strict`` is set.
+    script runs out the last step repeats, unless ``strict`` is set. String
+    steps finish with ``finish_reason="stop"``; script a full response to test
+    other finish reasons such as ``"length"``.
     """
 
     script: Iterable[Step] | Responder = ("SELECT 1",)
@@ -69,4 +71,5 @@ class FakeProvider:
             prompt_tokens=rough_token_count(prompt),
             completion_tokens=rough_token_count(step),
             raw={"provider": self.name},
+            finish_reason="stop",
         )

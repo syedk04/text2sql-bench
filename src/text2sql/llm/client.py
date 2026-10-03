@@ -98,7 +98,7 @@ class LLMClient:
         run_id: str | None = None,
         question_id: int | None = None,
     ) -> CompletionResponse:
-        key = cache_key(request)
+        key = cache_key(request, provider=self.provider.name)
         start = self._clock()
         base = dict(
             run_id=run_id,
@@ -165,8 +165,9 @@ class LLMClient:
                 raise
 
             # An empty answer is more likely a provider hiccup than a real
-            # reply, so it is returned but not cached.
-            if self.cache is not None and response.text.strip():
+            # reply, and a truncated one is incomplete; both are returned but
+            # not cached.
+            if self.cache is not None and response.text.strip() and not response.truncated:
                 self.cache.put(key, request, response)
             if self.budget is not None:
                 self.budget.record(response.total_tokens)

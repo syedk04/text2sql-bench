@@ -67,7 +67,8 @@ def test_miss_then_hit(env):
     assert provider.calls == 1
     log = read_log(log_path)
     assert [(r.cache_hit, r.attempts, r.status) for r in log] == [(False, 1, "ok"), (True, 0, "ok")]
-    assert log[0].key == cache_key(_req()) and log[0].question_id == 5 and log[0].run_id == "r"
+    assert log[0].key == cache_key(_req(), provider="fake")
+    assert log[0].question_id == 5 and log[0].run_id == "r"
     assert client.budget.used == first.total_tokens  # the hit was not charged
 
 
@@ -170,14 +171,14 @@ def test_works_without_optional_parts():
 def test_corrupt_cache_entry_falls_back_to_provider(tmp_path, content):
     cache = DiskCache(tmp_path)
     req = _req()
-    path = cache.path_for(cache_key(req))
+    path = cache.path_for(cache_key(req, provider="fake"))
     path.parent.mkdir(parents=True)
     path.write_bytes(content)
     provider = FakeProvider(["SELECT 9"])
     client = LLMClient(provider, cache=cache)
     assert client.complete(req).text == "SELECT 9"
     assert provider.calls == 1
-    assert cache.get(cache_key(req)).text == "SELECT 9"  # repaired
+    assert cache.get(cache_key(req, provider="fake")).text == "SELECT 9"  # repaired
 
 
 @pytest.mark.parametrize(
@@ -221,3 +222,24 @@ def test_empty_completion_is_returned_but_not_cached(tmp_path, text):
     assert len(cache) == 0
     assert client.complete(_req()).text == "SELECT 1"  # asked again, not served empty
     assert provider.calls == 2
+
+
+@pytest.mark.parametrize("reason", ["length", "max_tokens", "LENGTH"])
+def test_truncated_answers_are_returned_but_not_cached(tmp_path, reason):
+    cache = DiskCache(tmp_path)
+    cut = CompletionResponse("SELECT a, b FROM", 10, 100, finish_reason=reason)
+    provider = FakeProvider([cut, "SELECT a, b FROM t"])
+    client = LLMClient(provider, cache=cache)
+    assert client.complete(_req()) is cut
+    assert len(cache) == 0
+    assert client.complete(_req()).text == "SELECT a, b FROM t"
+    assert len(cache) == 1
+    assert cache.get(cache_key(_req(), provider="fake")).finish_reason == "stop"
+
+
+def test_key_depends_on_provider_name(tmp_path):
+    cache = DiskCache(tmp_path)
+    LLMClient(FakeProvider(["A"], name="one"), cache=cache).complete(_req())
+    other = FakeProvider(["B"], name="two")
+    assert LLMClient(other, cache=cache).complete(_req()).text == "B"
+    assert other.calls == 1
